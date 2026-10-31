@@ -1,0 +1,3 @@
+# Seeds and the prompt baseline are compared byte by byte: keep them LF on every checkout.
+seed/*.ron text eol=lf
+src/*.baseline.txt text eol=lf

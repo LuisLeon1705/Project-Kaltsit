@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kal'tsit</title>
+<link rel="stylesheet" href="chat.css">
+</head>
+<body>
+<header class="top">
+  <div class="id">
+    <span class="sigil" aria-hidden="true">✚</span>
+    <div class="id-text">
+      <div class="name">Kal'tsit <button type="button" id="moralState" class="tag moral" data-i18n-title="title.moral">⚖</button> <span id="mcState" class="tag mc hidden" data-i18n-title="title.mc"></span></div>
+      <div class="sub" id="status" data-i18n="status.idle"></div>
+    </div>
+  </div>
+  <div class="top-right">
+    <span id="llm" class="llm">…</span>
+    <div id="hormones" class="hormones" data-i18n-title="title.hormones"></div>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" role="tablist" data-i18n-aria="tabs.aria">
+  <button type="button" role="tab" data-view="chat" class="on" aria-selected="true" data-i18n="tab.chat"></button>
+  <button type="button" role="tab" data-view="plan" data-i18n-title="tab.plan.title"><span data-i18n="tab.plan"></span></button>
+  <button type="button" role="tab" data-view="memory" data-i18n="tab.memory" data-i18n-title="tab.memory.title"></button>
+  <button type="button" role="tab" data-view="moral" data-i18n="tab.moral" data-i18n-title="tab.moral.title"></button>
+  <button type="button" role="tab" data-view="net" data-i18n="tab.net" data-i18n-title="tab.net.title"></button>
+  <button type="button" role="tab" data-view="models" data-i18n="tab.models" data-i18n-title="tab.models.title"></button>
+  <button type="button" role="tab" data-view="accessories" data-i18n="tab.accessories" data-i18n-title="tab.accessories.title"></button>
+</nav>
+
+<section class="view" data-view="chat" data-i18n-aria="tab.chat">
+  <div class="switches" role="group" data-i18n-aria="switches.aria">
+    <label class="pill amber" data-i18n-title="sw.reposo.title"><input type="checkbox" id="reposo"> <span data-i18n="sw.reposo"></span></label>
+    <label class="pill" data-i18n-title="sw.vision.title"><input type="checkbox" id="vision"> <span data-i18n="sw.vision"></span></label>
+    <label class="pill" data-i18n-title="sw.wander.title"><input type="checkbox" id="wander"> <span data-i18n="sw.wander"></span></label>
+    <label class="pill" data-i18n-title="sw.voice.title"><input type="checkbox" id="voiceOn"> <span data-i18n="sw.voice"></span></label>
+    <label class="pill" data-i18n-title="sw.minecraft.title"><input type="checkbox" id="minecraft"> <span data-i18n="sw.minecraft"></span></label>
+    <label class="pill" data-i18n-title="sw.hideChat.title"><input type="checkbox" id="hideChat"> <span data-i18n="sw.hideChat"></span></label>
+    <div class="lang-wrap">
+      <select id="langSel" class="lang-pill" data-i18n-aria="lang.label" data-i18n-title="lang.label">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+      </select>
+      <div id="langHint" class="lang-hint hidden" data-i18n="lang.hint"></div>
+    </div>
+    <button type="button" id="look" class="ghost" data-i18n="look" data-i18n-title="look.title"></button>
+  </div>
+  <main id="log" class="log" aria-live="polite"></main>
+  <div id="moralBanner" class="moral-banner hidden" role="status"></div>
+  <form id="composer" class="composer">
+    <textarea id="input" rows="2" data-i18n-placeholder="composer.placeholder" maxlength="4000"></textarea>
+    <div class="micbox">
+      <label class="auto" data-i18n-title="openmic.title"><input type="checkbox" id="openmic"> <span>Auto</span></label>
+      <button type="button" id="mic" class="mic" data-i18n-title="mic.title" data-i18n-aria="mic.aria">🎙</button>
+    </div>
+    <button type="submit" id="send" data-i18n="composer.send"></button>
+  </form>
+</section>
+
+<section class="view hidden" data-view="plan" data-i18n-aria="tab.plan">
+  <div class="scroll" id="planBody"></div>
+</section>
+
+<section class="view hidden" data-view="memory" data-i18n-aria="tab.memory">
+  <div class="view-head mem-head">
+    <input type="search" id="memSearch" class="mem-search" data-i18n-placeholder="mem.search.placeholder" autocomplete="off" spellcheck="false">
+    <span id="memSearchCount" class="mem-search-count hidden"></span>
+    <button type="button" id="memCollapse" class="ghost" data-i18n="mem.core" data-i18n-title="mem.core.title"></button>
+    <button type="button" id="memCenter" class="ghost" data-i18n="mem.center" data-i18n-title="mem.center.title"></button>
+    <button type="button" id="memViewer" class="ghost" data-i18n="mem.viewer" data-i18n-title="mem.viewer.title"></button>
+  </div>
+  <div class="mem-bar">
+    <nav class="mem-path" id="memPath" data-i18n-aria="mem.path.aria"></nav>
+    <div class="mem-legend" id="memLegend"></div>
+    <div class="mem-note" id="memNote"></div>
+  </div>
+  <div class="mem-stage" id="memStage">
+    <svg id="memSvg" class="mem-svg" role="img" data-i18n-aria="mem.svg.aria"></svg>
+    <div class="mem-zoom" role="group" data-i18n-aria="zoom.aria">
+      <button type="button" id="memZoomIn" class="ghost" data-i18n-title="zoom.in">＋</button>
+      <button type="button" id="memZoomOut" class="ghost" data-i18n-title="zoom.out">−</button>
+    </div>
+    <div id="memEmpty" class="empty hidden"></div>
+    <aside id="memDetail" class="mem-detail hidden" data-i18n-aria="mem.detail.aria"></aside>
+  </div>
+</section>
+
+<section class="view hidden" data-view="moral" data-i18n-aria="tab.moral">
+  <div class="scroll" id="moralBody"></div>
+</section>
+
+<section class="view hidden" data-view="net" data-i18n-aria="tab.net">
+  <div class="scroll" id="netBody"></div>
+</section>
+
+<section class="view hidden" data-view="models" data-i18n-aria="tab.models">
+  <div class="scroll" id="modelsBody"></div>
+</section>
+
+<section class="view hidden" data-view="accessories" data-i18n-aria="tab.accessories">
+  <div class="scroll" id="accBody"></div>
+</section>
+
+<div id="link" class="ask hidden" role="dialog" data-i18n-aria="link.aria">
+  <div class="ask-box">
+    <div class="ask-title" id="linkTitle"></div>
+    <div class="link-code" id="linkCode"></div>
+    <p id="linkText"></p>
+    <div class="ask-row">
+      <button type="button" id="linkNo" class="ghost" data-i18n="link.no"></button>
+      <button type="button" id="linkYes" data-i18n="link.yes"></button>
+      <button type="button" id="linkDone" class="hidden" data-i18n="link.close"></button>
+    </div>
+  </div>
+</div>
+
+<div id="ask" class="ask hidden" role="dialog" data-i18n-aria="ask.aria">
+  <div class="ask-box">
+    <div class="ask-title" id="askTitle"></div>
+    <p id="askText"></p>
+    <div class="ask-row">
+      <button type="button" id="askNo" class="ghost" data-i18n="link.no"></button>
+      <button type="button" id="askYes" data-i18n="link.yes"></button>
+    </div>
+  </div>
+</div>
+
+<!-- First launch: shown while the state says primer_arranque; blocks the whole window. -->
+<div id="firstRun" class="ask first-run hidden" role="dialog" aria-modal="true" aria-labelledby="frTitle">
+  <form class="ask-box" id="frForm" novalidate>
+    <div class="ask-title" id="frTitle" data-i18n="fr.title"></div>
+    <p id="frBody" data-i18n="fr.body"></p>
+    <label class="fr-label" for="frName" id="frNameLabel" data-i18n="fr.name"></label>
+    <input type="text" id="frName" class="fr-input" maxlength="40" autocomplete="off" spellcheck="false">
+    <label class="fr-label" for="frLang" id="frLangLabel" data-i18n="fr.language"></label>
+    <select id="frLang" class="fr-input">
+      <option value="en">English</option>
+      <option value="es">Español</option>
+    </select>
+    <div id="frRecommend" class="fr-recommend"></div>
+    <div id="frError" class="fr-error hidden" role="alert"></div>
+    <div class="ask-row">
+      <button type="submit" id="frGo" data-i18n="fr.go"></button>
+    </div>
+  </form>
+</div>
+
+<script src="i18n.js"></script>
+<script src="chat.js"></script>
+</body>
+</html>

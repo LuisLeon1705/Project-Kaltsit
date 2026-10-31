@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "El chat, el chibi y el visor de la memoria solo escuchan eventos e invocan los comandos propios de la app.",
+  "windows": ["chat", "overlay", "visor"],
+  "permissions": ["core:default"]
+}

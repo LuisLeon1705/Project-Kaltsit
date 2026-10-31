@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kal'tsit</title>
+<link rel="stylesheet" href="visor.css">
+</head>
+<body>
+<header>
+  <div class="id"><span class="sigil">✚</span><b data-i18n="visor.heading"></b><span class="ro" id="stamp" data-i18n="visor.readOnly" data-i18n-title="visor.readOnly.title"></span></div>
+  <nav id="views">
+    <button type="button" data-v="santuario" data-i18n="visor.v.santuario" data-i18n-title="visor.v.santuario.title"></button>
+    <button type="button" data-v="helice" data-i18n="visor.v.helice" data-i18n-title="visor.v.helice.title"></button>
+    <button type="button" data-v="arboleda" data-i18n="visor.v.arboleda" data-i18n-title="visor.v.arboleda.title"></button>
+    <button type="button" data-v="constelacion" data-i18n="visor.v.constelacion" data-i18n-title="visor.v.constelacion.title"></button>
+  </nav>
+  <label class="toggle" id="terraBox" data-i18n-title="visor.terra.title"><input type="checkbox" id="terra"> <span data-i18n="visor.terra"></span></label>
+  <input id="search" type="search" data-i18n-placeholder="visor.search" autocomplete="off">
+  <button type="button" id="reset" class="ghost" data-i18n="visor.reset" data-i18n-title="visor.reset.title"></button>
+</header>
+<main>
+  <canvas id="cv"></canvas>
+  <aside id="detail" class="hidden">
+    <button type="button" id="detailClose" class="ghost" data-i18n-aria="visor.close">×</button>
+    <div id="detailBody"></div>
+  </aside>
+  <div id="legend"></div>
+  <div id="help" data-i18n="visor.help"></div>
+  <div id="empty" class="hidden"></div>
+</main>
+<script src="i18n.js"></script>
+<script src="visor.js"></script>
+</body>
+</html>

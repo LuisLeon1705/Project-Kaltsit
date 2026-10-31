@@ -1,0 +1,563 @@
+{
+  "version": 1,
+  "carpeta": "modelos",
+  "perfiles": [
+    {
+      "id": "cpu",
+      "nombre": "Solo CPU · 16 GB RAM",
+      "vram_gb": 16.0,
+      "reserva_gb": 8.0,
+      "cpu_only": true,
+      "nota": "Sin gráfica dedicada: el modelo corre en el procesador usando la RAM del sistema (más lento)."
+    },
+    {
+      "id": "gpu-4gb",
+      "nombre": "GPU · 4 GB VRAM",
+      "vram_gb": 4.0,
+      "reserva_gb": 0.5,
+      "nota": "Caben con holgura los modelos de 2B con visión incluida."
+    },
+    {
+      "id": "gpu-6gb",
+      "nombre": "GPU · 6 GB VRAM",
+      "vram_gb": 6.44,
+      "reserva_gb": 0.84,
+      "nota": "En portátil la pantalla suele ir por la gráfica integrada: se reserva poco."
+    },
+    {
+      "id": "gpu-8gb",
+      "nombre": "GPU · 8 GB VRAM",
+      "vram_gb": 8.59,
+      "reserva_gb": 1.0,
+      "nota": "Si la tarjeta también dibuja el escritorio, se reserva ~1 GB."
+    },
+    {
+      "id": "gpu-12gb",
+      "nombre": "GPU · 12 GB VRAM",
+      "vram_gb": 12.0,
+      "reserva_gb": 1.0,
+      "nota": "Caben con holgura todos los modelos ligeros y medios del catálogo."
+    },
+    {
+      "id": "gpu-16gb",
+      "nombre": "GPU · 16+ GB VRAM",
+      "vram_gb": 16.0,
+      "reserva_gb": 1.0,
+      "nota": "Sobrado para todos los modelos del catálogo y contextos largos."
+    }
+  ],
+  "elementos": [
+    {
+      "id": "qwen35-2b-q4",
+      "tipo": "cerebro",
+      "nivel": "ligero",
+      "nombre": "Qwen3.5 2B · Q4_K_M",
+      "nota": "Muy ligero y con visión; pensado para correr en solo CPU (16 GB de RAM) o en gráficas de 4 GB de VRAM.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+          "destino": "llm/Qwen3.5-2B-Q4_K_M.gguf",
+          "bytes": 1280835840,
+          "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/Qwen3.5-2B-mmproj-F16.gguf",
+          "bytes": 668227264,
+          "sha256": "7035e9cb8d7c6a9681d07eef9a364783e86ea4cd73faab2eabb4f43a101830c7",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "qwen35-2b-q6",
+      "tipo": "cerebro",
+      "nivel": "ligero",
+      "nombre": "Qwen3.5 2B · Q6_K",
+      "nota": "El mismo 2B con cuantización Q6 (casi sin pérdida) y visión; entra en 4 GB de VRAM o en CPU con 16 GB de RAM.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q6_K.gguf",
+          "destino": "llm/Qwen3.5-2B-Q6_K.gguf",
+          "bytes": 1574961408,
+          "sha256": "fc90339420b4298887aafb307a4291c55440b730133bbffe6ba9630503dcb548",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/Qwen3.5-2B-mmproj-F16.gguf",
+          "bytes": 668227264,
+          "sha256": "7035e9cb8d7c6a9681d07eef9a364783e86ea4cd73faab2eabb4f43a101830c7",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "gemma3-4b-q4",
+      "tipo": "cerebro",
+      "nivel": "ligero",
+      "nombre": "Gemma 3 4B · Q4_K_M",
+      "nota": "Modelo de 4B ligero con buena expresión en español e inglés y visión incluida.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
+          "destino": "llm/gemma-3-4b-it-Q4_K_M.gguf",
+          "bytes": 2489894016,
+          "sha256": "04a43a22e8d2003deda5acc262f68ec1005fa76c735a9962a8c77042a74a7d19",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/gemma-3-4b-mmproj-F16.gguf",
+          "bytes": 851251328,
+          "sha256": "731199e016ec5f227b8293fef839899472e0ee4c51adf5f9e5cb66f6558fa142",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "qwen35-4b-q4",
+      "tipo": "cerebro",
+      "nivel": "ligero",
+      "nombre": "Qwen3.5 4B · Q4_K_M",
+      "nota": "Rápido y con visión; buen razonamiento para su tamaño. El más seguro en 6 GB de VRAM.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+          "destino": "llm/Qwen3.5-4B-Q4_K_M.gguf",
+          "bytes": 2740937888,
+          "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/Qwen3.5-4B-mmproj-F16.gguf",
+          "bytes": 672423616,
+          "sha256": "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "gemma4-e2b-q4",
+      "tipo": "cerebro",
+      "nivel": "ligero",
+      "nombre": "Gemma 4 E2B · Q4_K_M",
+      "nota": "Ligero, con prosa muy natural para su tamaño y visión incluida.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
+          "destino": "llm/gemma-4-E2B-it-Q4_K_M.gguf",
+          "bytes": 3106738272,
+          "sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/gemma-4-E2B-mmproj-F16.gguf",
+          "bytes": 985654080,
+          "sha256": "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "qwen35-4b-q6",
+      "tipo": "cerebro",
+      "nivel": "medio",
+      "nombre": "Qwen3.5 4B · Q6_K",
+      "nota": "El mismo 4B con casi la calidad completa; buen modelo medio para 6 a 8 GB.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q6_K.gguf",
+          "destino": "llm/Qwen3.5-4B-Q6_K.gguf",
+          "bytes": 3525956768,
+          "sha256": "fdedd781c9ce676ab66b018ca247ff78e8a33c98098a822c1e2d5075e7718f66",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/Qwen3.5-4B-mmproj-F16.gguf",
+          "bytes": 672423616,
+          "sha256": "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "gemma4-e4b-q3",
+      "tipo": "cerebro",
+      "nivel": "medio",
+      "nombre": "Gemma 4 E4B · Q3_K_M (contexto 4096)",
+      "nota": "Más capacidad que el E2B en VRAM moderada, a cambio de cuantización Q3 y menos contexto.",
+      "ctx": 4096,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q3_K_M.gguf",
+          "destino": "llm/gemma-4-E4B-it-Q3_K_M.gguf",
+          "bytes": 4058137728,
+          "sha256": "0980898d0e7d9c75cea05141bf4010393312101ef6cf5b31f8197e0de18655f4",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/gemma-4-E4B-mmproj-F16.gguf",
+          "bytes": 990372672,
+          "sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "gemma4-e4b-q4",
+      "tipo": "cerebro",
+      "nivel": "medio",
+      "nombre": "Gemma 4 E4B · Q4_K_M",
+      "nota": "Buena prosa y visión para tarjetas de 8 GB o más de VRAM.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf",
+          "destino": "llm/gemma-4-E4B-it-Q4_K_M.gguf",
+          "bytes": 4977171584,
+          "sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/gemma-4-E4B-mmproj-F16.gguf",
+          "bytes": 990372672,
+          "sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "qwen35-9b-iq4",
+      "tipo": "cerebro",
+      "nivel": "medio",
+      "nombre": "Qwen3.5 9B · IQ4_XS",
+      "nota": "El que mejor razona del catálogo; pensado para 8 GB (ajustado) o 12+ GB de VRAM.",
+      "ctx": 8192,
+      "archivos": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf",
+          "destino": "llm/Qwen3.5-9B-IQ4_XS.gguf",
+          "bytes": 5168653536,
+          "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+          "rol": "modelo"
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/mmproj-F16.gguf",
+          "destino": "mmproj/Qwen3.5-9B-mmproj-F16.gguf",
+          "bytes": 918166080,
+          "sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f",
+          "rol": "mmproj"
+        }
+      ]
+    },
+    {
+      "id": "voz-daniela",
+      "tipo": "voz",
+      "nivel": "ligero",
+      "nombre": "Piper · es_AR Daniela",
+      "nota": "Voz femenina rioplatense. En CPU sintetiza unas 5 veces más rápido que lo que tarda en decirlo.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_AR-daniela-high.tar.bz2",
+          "destino": "voz/vits-piper-es_AR-daniela-high.tar.bz2",
+          "bytes": 115562134,
+          "sha256": "71cbf6b7f646ab74f3c51336151abef41e6c54467ac929ffdb19ed706a07dd7b",
+          "rol": "zip",
+          "extraer": "voz"
+        }
+      ],
+      "voz": {
+        "motor": "vits",
+        "carpeta": "voz/vits-piper-es_AR-daniela-high",
+        "sid": 0
+      }
+    },
+    {
+      "id": "voz-kokoro-dora",
+      "tipo": "voz",
+      "nivel": "medio",
+      "nombre": "Kokoro 82M (int8) · ef_dora",
+      "nota": "Más natural que Piper, pero en CPU tarda casi lo mismo que dura lo que dice: puede hacer pausas entre frases.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+          "destino": "voz/kokoro-int8-multi-lang-v1_0.tar.bz2",
+          "bytes": 132303094,
+          "sha256": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
+          "rol": "zip",
+          "extraer": "voz"
+        }
+      ],
+      "voz": {
+        "motor": "kokoro",
+        "carpeta": "voz/kokoro-int8-multi-lang-v1_0",
+        "sid": 28,
+        "lang": "es"
+      }
+    },
+    {
+      "id": "voz-kaltsit-en",
+      "tipo": "voz",
+      "nivel": "medio",
+      "nombre": "Kal'tsit (inglés) · Pocket TTS",
+      "nota": "Su voz, clonada de 10 s de una de sus líneas en inglés del juego (arknights.wiki.gg). Habla en inglés: dice una versión breve en inglés de cada respuesta. Solo para uso personal.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+          "destino": "voz/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+          "bytes": 98336520,
+          "sha256": "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb",
+          "rol": "zip",
+          "extraer": "voz"
+        },
+        {
+          "url": "https://arknights.wiki.gg/images/Kal%27tsit-003-EN.ogg",
+          "destino": "voz/kaltsit/Kaltsit-003-EN.ogg",
+          "bytes": 154739,
+          "sha256": "8a991920791997231681f5382d0edf2a42b4ab81f0d799190b7a6398d3caad49",
+          "rol": "referencia",
+          "convertir": "voz/kaltsit/referencia.wav"
+        }
+      ],
+      "voz": {
+        "motor": "pocket",
+        "carpeta": "voz/sherpa-onnx-pocket-tts-int8-2026-01-26",
+        "idioma": "en",
+        "referencia": "voz/kaltsit/referencia.wav",
+        "ajustes": {
+          "temperature": 0.7
+        }
+      }
+    },
+    {
+      "id": "llama-b11633-cuda12",
+      "tipo": "motor",
+      "nivel": "ligero",
+      "nombre": "llama.cpp b11633 · CUDA 12.4",
+      "nota": "El servidor que corre los modelos GGUF. CUDA 12.4 funciona con drivers NVIDIA desde la serie 550.",
+      "archivos": [
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11633/llama-b11633-bin-win-cuda-12.4-x64.zip",
+          "destino": "bin/llama-b11633-bin-win-cuda-12.4-x64.zip",
+          "bytes": 266607467,
+          "sha256": "1f7bedf73c8385ee318d249665ce4671059c9394854529aa439bc6f6b5c5eddd",
+          "rol": "zip",
+          "extraer": "bin/llama"
+        },
+        {
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11633/cudart-llama-bin-win-cuda-12.4-x64.zip",
+          "destino": "bin/cudart-llama-bin-win-cuda-12.4-x64.zip",
+          "bytes": 391443627,
+          "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+          "rol": "zip",
+          "extraer": "bin/llama"
+        }
+      ],
+      "servidor": "bin/llama/llama-server.exe"
+    },
+    {
+      "id": "oido-whisper-turbo",
+      "tipo": "oido",
+      "nivel": "medio",
+      "nombre": "Whisper turbo · dictado preciso",
+      "nota": "El que mejor entiende una voz baja o poco clara (con una voz suave de 2,9 s acertó donde base escribió otra cosa). En CPU tarda más o menos lo que dura lo dicho (2,5 s para 2,9 s). Unos 564 MB de descarga, 1 GB en disco. Si está descargado, se usa este.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2",
+          "destino": "asr/sherpa-onnx-whisper-turbo.tar.bz2",
+          "bytes": 563790207,
+          "sha256": "b11acbbcd660b44a8e0df33724feb5aaa709cf65668f2823d59f656312544f22",
+          "rol": "zip",
+          "extraer": "asr"
+        }
+      ],
+      "oido": {
+        "motor": "whisper",
+        "carpeta": "asr/sherpa-onnx-whisper-turbo"
+      }
+    },
+    {
+      "id": "oido-whisper-base",
+      "tipo": "oido",
+      "nivel": "ligero",
+      "nombre": "Whisper base · dictado",
+      "nota": "Entiende español e inglés (el idioma de la app). En CPU transcribe 5 s de audio en medio segundo (1 s más la primera vez, al cargarlo). Ocupa unos 207 MB de descarga.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2",
+          "destino": "asr/sherpa-onnx-whisper-base.tar.bz2",
+          "bytes": 207557382,
+          "sha256": "911b2083efd7c0dca2ac3b358b75222660dc09fb716d64fbfc417ba6c99ff3de",
+          "rol": "zip",
+          "extraer": "asr"
+        }
+      ],
+      "oido": {
+        "motor": "whisper",
+        "carpeta": "asr/sherpa-onnx-whisper-base"
+      }
+    },
+    {
+      "id": "oido-whisper-tiny",
+      "tipo": "oido",
+      "nivel": "ligero",
+      "nombre": "Whisper tiny · dictado",
+      "nota": "El más pequeño (116 MB): rápido, pero se equivoca más con el español. Solo si vas justo de espacio.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2",
+          "destino": "asr/sherpa-onnx-whisper-tiny.tar.bz2",
+          "bytes": 116204861,
+          "sha256": "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1",
+          "rol": "zip",
+          "extraer": "asr"
+        }
+      ],
+      "oido": {
+        "motor": "whisper",
+        "carpeta": "asr/sherpa-onnx-whisper-tiny"
+      }
+    },
+    {
+      "id": "oido-voces",
+      "tipo": "oido",
+      "nivel": "ligero",
+      "nombre": "Oído fino · ruido y voces",
+      "nota": "Limpia el ruido del micrófono (GTCRN), recorta los silencios (Silero), reconoce de quién es cada voz (CAM++, chino e inglés, funciona con cualquier idioma) y separa a varias personas en una misma grabación (pyannote). Unos 36 MB; necesita un modelo de dictado.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+          "destino": "oido/gtcrn_simple.onnx",
+          "bytes": 535638,
+          "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534",
+          "rol": "limpieza"
+        },
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+          "destino": "oido/silero_vad.onnx",
+          "bytes": 643854,
+          "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+          "rol": "vad"
+        },
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+          "destino": "oido/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+          "bytes": 28281164,
+          "sha256": "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
+          "rol": "huella"
+        },
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+          "destino": "oido/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+          "bytes": 6958444,
+          "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+          "rol": "zip",
+          "extraer": "oido"
+        }
+      ],
+      "oido": {
+        "motor": "voces",
+        "carpeta": "oido"
+      }
+    },
+    {
+      "id": "voz-sherpa",
+      "tipo": "motor",
+      "nivel": "ligero",
+      "nombre": "sherpa-onnx 1.13.8 · motor de voz",
+      "nota": "Sintetiza la voz en CPU (Piper, Kokoro o Pocket) y reconoce la tuya (Whisper). Hace falta para cualquier voz y para el dictado.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-win-x64-shared-MT-Release.tar.bz2",
+          "destino": "bin/sherpa-onnx-v1.13.8-win-x64-shared-MT-Release.tar.bz2",
+          "bytes": 24805859,
+          "sha256": "6dffdc715a4465b989446a6105265d2cb345e7101591a17d35534b6758f6e8df",
+          "rol": "zip",
+          "extraer": "bin/sherpa"
+        }
+      ],
+      "servidor": "bin/sherpa/sherpa-onnx-v1.13.8-win-x64-shared-MT-Release/lib/sherpa-onnx-c-api.dll"
+    }
+  ],
+  "packs": [
+    {
+      "id": "ligero-cpu",
+      "perfil": "cpu",
+      "nombre": "Ligero · Solo CPU",
+      "incluye": [
+        "qwen35-2b-q4",
+        "voz-daniela",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    },
+    {
+      "id": "ligero-gpu-4gb",
+      "perfil": "gpu-4gb",
+      "nombre": "Ligero · 4 GB VRAM",
+      "incluye": [
+        "qwen35-2b-q4",
+        "voz-daniela",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    },
+    {
+      "id": "ligero-gpu-6gb",
+      "perfil": "gpu-6gb",
+      "nombre": "Ligero · 6 GB VRAM",
+      "incluye": [
+        "qwen35-4b-q4",
+        "voz-daniela",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    },
+    {
+      "id": "medio-gpu-6gb",
+      "perfil": "gpu-6gb",
+      "nombre": "Medio · 6 GB VRAM",
+      "incluye": [
+        "qwen35-4b-q6",
+        "voz-kokoro-dora",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    },
+    {
+      "id": "ligero-gpu-8gb",
+      "perfil": "gpu-8gb",
+      "nombre": "Ligero · 8 GB VRAM",
+      "incluye": [
+        "qwen35-4b-q4",
+        "voz-daniela",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    },
+    {
+      "id": "medio-gpu-8gb",
+      "perfil": "gpu-8gb",
+      "nombre": "Medio · 8 GB VRAM",
+      "incluye": [
+        "gemma4-e4b-q4",
+        "voz-kokoro-dora",
+        "voz-sherpa",
+        "llama-b11633-cuda12"
+      ]
+    }
+  ]
+}

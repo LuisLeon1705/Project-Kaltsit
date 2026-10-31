@@ -1,0 +1,38 @@
+[package]
+name = "kaltsit"
+version = "0.1.0"
+edition = "2021"
+description = "Kal'tsit: asistente de escritorio que ve la pantalla, habla en burbujas y camina por ella (memoria CTHG + hormonas)"
+
+[[bin]]
+name = "kaltsit"
+path = "src/main.rs"
+
+# Command line of the engine: model catalog and downloads (`cthg models ...`).
+[[bin]]
+name = "cthg"
+path = "src/bin/cthg.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ron = "0.8"
+ureq = { version = "2", features = ["json"] }
+base64 = "0.22"
+tiny_http = "0.12"
+sha2 = "0.10"
+# The link between computers: one key pair per computer, sealed messages between linked ones.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+# Decodes the voice clip a cloning voice imitates (Ogg Vorbis from the wiki).
+lewton = "0.10"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_NetworkManagement_IpHelper", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_Media_Audio"] }
+
+[profile.release]
+opt-level = 3

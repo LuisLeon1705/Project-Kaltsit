@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Kal'tsit</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  body { font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  #chibi { position: absolute; left: 50%; bottom: 0; width: 260px; height: 280px; transform: translateX(-50%); }
+  #bubble {
+    position: absolute; left: 12px; right: 12px; bottom: 250px;
+    max-height: 150px; overflow: hidden;
+    padding: 9px 13px 10px;
+    color: #e9ece6; background: rgba(18, 24, 26, 0.94);
+    border: 1px solid rgba(159, 210, 74, 0.55); border-radius: 12px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    opacity: 0; transform: translateY(6px); transition: opacity 0.25s, transform 0.25s;
+  }
+  #bubble.show { opacity: 1; transform: none; }
+  #bubble::after {
+    content: ""; position: absolute; bottom: -8px; left: 50%; margin-left: -8px;
+    border: 8px solid transparent; border-bottom: 0; border-top-color: rgba(159, 210, 74, 0.55);
+  }
+  #bubble .who { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #9fd24a; margin-bottom: 2px; }
+  #bubble .more { font-size: 11px; color: #8b938a; margin-top: 4px; }
+  #bubble.thinking #text::after { content: "…"; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0.2; } }
+</style>
+</head>
+<body>
+<div id="bubble"><div class="who">Kal'tsit</div><div id="text"></div></div>
+<canvas id="chibi"></canvas>
+<script src="vendor/spine-webgl.js"></script>
+<script src="chibi.js"></script>
+<script src="i18n.js"></script>
+<script src="overlay.js"></script>
+</body>
+</html>
