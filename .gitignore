@@ -1,0 +1,10 @@
+# Build artifacts
+build/
+temp_*/
+*.class
+
+# Package outputs (optional to track or ignore)
+*.args
+*.log
+*.log.gz
+minecraft/logs/

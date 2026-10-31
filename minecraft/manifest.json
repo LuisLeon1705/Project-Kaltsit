@@ -1,0 +1,24 @@
+{
+  "id": "minecraft-companion",
+  "name": "Kal'tsit Minecraft Companion",
+  "version": "1.2.2",
+  "game": "minecraft",
+  "loader": "fabric",
+  "minecraft_version": "26.2",
+  "ipc": {
+    "host": "127.0.0.1",
+    "port": 25599,
+    "frequency_hz": 20
+  },
+  "features": [
+    "standalone_entity",
+    "world_interaction_mining",
+    "world_interaction_door_air_pocket",
+    "world_interaction_potions",
+    "world_interaction_eating",
+    "world_interaction_mob_defense",
+    "creeper_fleeing",
+    "bidirectional_chat",
+    "voice_output_sync"
+  ]
+}

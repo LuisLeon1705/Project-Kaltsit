@@ -1,0 +1,22 @@
+{
+  "version": "1.2.2",
+  "name": "Kal'tsit Accessories Catalog",
+  "modules": [
+    {
+      "id": "minecraft-companion",
+      "name": "Minecraft Fabric Companion",
+      "version": "1.2.2",
+      "category": "game-mod",
+      "target": "Minecraft 26.2 (Fabric)",
+      "minecraft": "26.2",
+      "requires": [
+        "fabric-api"
+      ],
+      "folder": "minecraft",
+      "jar": "kaltsit-companion-standalone-1.2.2.jar",
+      "sha256": "b78247362b778434cf2e8fd1978917715ffc689e9b40f237e144536e5764ec59",
+      "ipc_port": 25599,
+      "description": "Kal'tsit con cuerpo de jugadora: modelo y animaciones de jugador, armadura visible, corre, salta, nada y se agacha contigo; pelea con el daño de su arma, recoge lo que cae y come (de tu inventario si no tiene). Construye como un jugador: antes enseña un holograma del plano (y la pestaña Plano de la app) que puedes mover bloque a bloque, girar, aceptar o descartar; casas, torres, muros, puentes, corrales, planos del modelo o tus estructuras guardadas. Si la dejas construyendo, sigue sola (mantiene cargada la zona) y te espera junto a la obra. En supervivencia reaparece en su cama. Respeta zonas sin antorchas."
+    }
+  ]
+}
