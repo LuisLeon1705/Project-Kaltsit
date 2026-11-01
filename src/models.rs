@@ -337,42 +337,36 @@ pub fn remove_own(core: &Core, id: &str, delete_files: bool) -> Result<(), Strin
     Ok(())
 }
 
-// ── Kal'tsit's Spine 3.8 chibi (downloaded on demand from Ark-Models, like Ark-Pets) ──
+// ── the companions' Spine 3.8 chibis (downloaded on demand from Ark-Models, like Ark-Pets) ──
 
-const ARK_MODELS_BASE: &str = "https://raw.githubusercontent.com/isHarryh/Ark-Models/main/models/003_kalts";
+const ARK_MODELS_BASE: &str = "https://raw.githubusercontent.com/isHarryh/Ark-Models/main/models";
 
-const CHIBI_FILES: [(&str, u64, &str); 3] = [
-    ("build_char_003_kalts.atlas", 8_872, "cc245ca899d25df397a1aab19cf359c9851849dad8db3f8264f5aef725dc0a0d"),
-    ("build_char_003_kalts.png", 277_909, "e0a3f9fc65139520536e9a7b4c2ee03eb481277bb3ef591cb658a95ad00bcd53"),
-    ("build_char_003_kalts.skel", 159_443, "3f946202a188aadadd1adc1436f89891c545b50a210c12f3ac3e7a40f5bc4070"),
-];
-
-/// Ensures the 3 Spine 3.8 files (`build_char_003_kalts.{atlas,png,skel}`) are present in
-/// `modelos/spine/003_kalts/`, downloading any missing file from `isHarryh/Ark-Models` with
-/// SHA-256 verification, and returns them ready for the WebGL overlay (`atlas` text, `png`
-/// data URI, `skel` base64).
-pub fn chibi_model() -> Result<Value, String> {
+/// Ensures the 3 Spine 3.8 files of `model` are in `modelos/spine/<id>/`, downloading any missing
+/// one from `isHarryh/Ark-Models` with SHA-256 verification, and returns them ready for the WebGL
+/// overlay (`atlas` text, `png` data URI, `skel` base64).
+pub fn chibi_model(model: &crate::character::SpineModel) -> Result<Value, String> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = LOCK.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
-    let dir = Manifest::load().root().join("spine/003_kalts");
-    chibi_model_in(&dir, ARK_MODELS_BASE)
+    let dir = Manifest::load().root().join("spine").join(model.id);
+    chibi_model_in(&dir, &format!("{ARK_MODELS_BASE}/{}", model.id), model)
 }
 
-fn chibi_model_in(dir: &Path, base_url: &str) -> Result<Value, String> {
+fn chibi_model_in(dir: &Path, base_url: &str, model: &crate::character::SpineModel) -> Result<Value, String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD;
-    for &(name, bytes, sha256) in &CHIBI_FILES {
+    for &(name, bytes, sha256) in &model.files {
         let dest = dir.join(name);
         let url = format!("{}/{name}", base_url.trim_end_matches('/'));
         download::fetch(&url, &dest, bytes, sha256, &mut |_, _| {})?;
     }
-    let atlas = std::fs::read_to_string(dir.join(CHIBI_FILES[0].0)).map_err(|e| e.to_string())?;
-    let png = std::fs::read(dir.join(CHIBI_FILES[1].0)).map_err(|e| e.to_string())?;
-    let skel = std::fs::read(dir.join(CHIBI_FILES[2].0)).map_err(|e| e.to_string())?;
+    let atlas = std::fs::read_to_string(dir.join(model.files[0].0)).map_err(|e| e.to_string())?;
+    let png = std::fs::read(dir.join(model.files[1].0)).map_err(|e| e.to_string())?;
+    let skel = std::fs::read(dir.join(model.files[2].0)).map_err(|e| e.to_string())?;
     Ok(json!({
         "atlas": atlas,
         "png": format!("data:image/png;base64,{}", b64.encode(&png)),
         "skel": b64.encode(&skel),
+        "png_name": model.files[1].0,
     }))
 }
 
@@ -387,20 +381,23 @@ mod tests {
     }
 
     #[test]
-    fn chibi_files_manifest_is_well_formed() {
-        assert_eq!(CHIBI_FILES.len(), 3);
-        for &(name, bytes, sha) in &CHIBI_FILES {
-            assert!(name.starts_with("build_char_003_kalts."));
-            assert!(bytes > 0);
-            assert_eq!(sha.len(), 64);
-            assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
-        }
-        let cache = Manifest::load().root().join("spine/003_kalts");
-        if CHIBI_FILES.iter().all(|&(n, _, _)| cache.join(n).is_file()) {
-            let v = chibi_model_in(&cache, "http://127.0.0.1:9").expect("cached chibi_model_in");
-            assert!(v["atlas"].as_str().unwrap_or_default().contains("build_char_003_kalts.png"));
-            assert!(v["png"].as_str().unwrap_or_default().starts_with("data:image/png;base64,"));
-            assert!(!v["skel"].as_str().unwrap_or_default().is_empty());
+    fn every_companions_spine_files_are_well_formed() {
+        for c in crate::character::ALL {
+            let m = &c.spine;
+            for &(name, bytes, sha) in &m.files {
+                assert!(name.starts_with(&format!("build_char_{}.", m.id)), "{name}");
+                assert!(bytes > 0);
+                assert_eq!(sha.len(), 64);
+                assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+            }
+            // Downloaded already: served from the cache, without the network.
+            let cache = Manifest::load().root().join("spine").join(m.id);
+            if m.files.iter().all(|&(n, _, _)| cache.join(n).is_file()) {
+                let v = chibi_model_in(&cache, "http://127.0.0.1:9", m).expect("cached chibi_model_in");
+                assert!(v["atlas"].as_str().unwrap_or_default().contains(m.files[1].0));
+                assert!(v["png"].as_str().unwrap_or_default().starts_with("data:image/png;base64,"));
+                assert!(!v["skel"].as_str().unwrap_or_default().is_empty());
+            }
         }
     }
 

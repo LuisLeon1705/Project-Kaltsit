@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Kal'tsit</title>
+<style>
+  :root { color-scheme: dark; --bg: #0f1416; --panel: #151b1e; --line: #2a3236; --text: #e6e9e3; --muted: #8b938a; --green: #9fd24a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  main { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 16px; }
+  p { margin: 0; color: var(--muted); font-size: 13px; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  label.who { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: pointer; }
+  label.who:has(input:checked) { border-color: var(--c); }
+  label.who b { color: var(--c); font-size: 15px; }
+  label.who span { color: var(--muted); font-size: 12px; }
+  label.who .text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  label.who select { background: #0f1416; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
+  .bottom { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .bottom label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  button { background: var(--green); color: #10150d; border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #error { color: #e0605a; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-i18n="sel.title"></h1>
+  <p data-i18n="sel.hint"></p>
+  <div class="list" id="list"></div>
+  <div id="error"></div>
+  <div class="bottom">
+    <label><input type="checkbox" id="remember"> <span data-i18n="sel.remember"></span></label>
+    <button type="button" id="go" data-i18n="sel.go"></button>
+  </div>
+</main>
+<script src="i18n.js"></script>
+<script src="selector.js"></script>
+</body>
+</html>

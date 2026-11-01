@@ -35,6 +35,21 @@ impl Default for Llama {
     }
 }
 
+/// Her memory of what is worked on at this computer (`activity`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Actividad {
+    pub activa: bool,
+    /// Programs never recorded (the executable's name or the name she shows, any case).
+    pub excluir: Vec<String>,
+}
+
+impl Default for Actividad {
+    fn default() -> Self {
+        Actividad { activa: true, excluir: ["keepass", "keepassxc", "1password", "bitwarden"].map(String::from).to_vec() }
+    }
+}
+
 /// Her voice on this computer (it speaks where her body is).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -102,6 +117,9 @@ pub struct Local {
     /// Let the link work on networks Windows marks as public (a café, a hotel).
     pub redes_publicas: bool,
     pub accesorios: Accesorios,
+    pub actividad: Actividad,
+    /// Her body on the desktop: "spine" or "pixel"; empty, her character's default.
+    pub cuerpo: String,
 }
 
 impl Default for Local {
@@ -119,6 +137,8 @@ impl Default for Local {
             vinculados: Vec::new(),
             redes_publicas: false,
             accesorios: Accesorios::default(),
+            actividad: Actividad::default(),
+            cuerpo: String::new(),
         }
     }
 }

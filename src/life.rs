@@ -92,7 +92,109 @@ pub struct Body {
     pub leaving: Option<Side>,
 }
 
+/// Every companion running in this app; the first leads (the link between computers, the roles,
+/// Minecraft and the computer's activity go through her).
+pub struct Crew {
+    pub all: Vec<Arc<Core>>,
+}
+
+impl Crew {
+    pub fn lead(&self) -> &Arc<Core> {
+        &self.all[0]
+    }
+
+    /// Companion `id`, or the lead when there is no such one (or no id).
+    pub fn get(&self, id: Option<&str>) -> &Arc<Core> {
+        id.and_then(|id| self.all.iter().find(|c| c.who.id == id)).unwrap_or(self.lead())
+    }
+
+    /// A message to the group (typed or said).
+    pub fn hear(self: &Arc<Self>, text: String, voz: Option<Value>) -> Result<(), String> {
+        let lead = self.lead().clone();
+        let mut u = lock(&lead.sensor).take_for(&text);
+        u.voz = voz.filter(|v| v.as_array().is_some_and(|a| !a.is_empty()));
+        self.hear_utterance(u)
+    }
+
+    /// They answer in turns: the ones it names first, then the rest, opening by turns (who
+    /// answers first rotates). Each sees what the ones before her said. Afterwards, a companion
+    /// named in another's answer may answer her back, once (two of those at most per message).
+    /// Alone, or thinking on another computer, it is the lead's as before.
+    pub fn hear_utterance(self: &Arc<Self>, u: crate::sensor::Utterance) -> Result<(), String> {
+        let lead = self.lead().clone();
+        if self.all.len() == 1 || lead.role() != Role::Brain {
+            return lead.hear_utterance(u);
+        }
+        crate::voice::stop();
+        for c in &self.all {
+            if c.mind().config.reposo {
+                let _ = c.configure(&json!({ "reposo": false }));
+            }
+        }
+        let order = self.order_for(&u.said);
+        std::thread::spawn(move || {
+            let mut said: Vec<(&'static crate::character::Character, String)> = Vec::new();
+            for (k, core) in order.iter().enumerate() {
+                if !core.take_voice(Duration::from_secs(120)) {
+                    core.emit("k:error", json!({ "text": Ui::ErrStillBusy.say(&[]) }));
+                    continue;
+                }
+                let _free = Free(&core.busy);
+                let others: Vec<(String, String)> = said.iter().map(|(c, t)| (c.name.to_string(), t.clone())).collect();
+                let ghosts: &[String] = if k == 0 { &u.ghosts } else { &[] };
+                match core.answer_with_ghosts(&u.said, ghosts, u.voz.as_ref(), u.sonido.as_ref(), k == 0, &others) {
+                    Ok(reply) => said.push((core.who, reply)),
+                    Err(e) => {
+                        core.status("");
+                        core.emit("k:error", json!({ "text": e }));
+                    }
+                }
+            }
+            // Named by another: one answer back each, two at most.
+            let mut answered: Vec<&str> = Vec::new();
+            let round = said.clone();
+            for (speaker, reply) in &round {
+                for core in &order {
+                    if answered.len() >= 2 || core.who.id == speaker.id || answered.contains(&core.who.id) || !names(reply, core.who) {
+                        continue;
+                    }
+                    if !core.take_voice(Duration::from_secs(60)) {
+                        continue;
+                    }
+                    let _free = Free(&core.busy);
+                    let hint = crate::lang::group_reply_hint(core.mind().lang(), speaker.name, reply);
+                    if let Err(e) = core.reply_with_hint(&u.said, &hint, 160) {
+                        core.emit("k:error", json!({ "text": e }));
+                    }
+                    answered.push(core.who.id);
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Who answers, in order: the ones the message names, then the others, starting from the next
+    /// one each time.
+    fn order_for(&self, text: &str) -> Vec<Arc<Core>> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = self.all.len();
+        let start = NEXT.fetch_add(1, Ordering::Relaxed) as usize % n;
+        let rotated: Vec<Arc<Core>> = (0..n).map(|i| self.all[(start + i) % n].clone()).collect();
+        let (mut named, rest): (Vec<_>, Vec<_>) = rotated.into_iter().partition(|c| names(text, c.who));
+        named.extend(rest);
+        named
+    }
+}
+
+/// `text` names companion `c` (her name, or her id, any case).
+fn names(text: &str, c: &crate::character::Character) -> bool {
+    let t = text.to_lowercase();
+    t.contains(&c.name.to_lowercase()) || t.contains(c.id)
+}
+
 pub struct Core {
+    /// Which companion this is.
+    pub who: &'static crate::character::Character,
     pub mind: Mutex<Mind>,
     pub llm: Llm,
     pub app: AppHandle,
@@ -107,6 +209,8 @@ pub struct Core {
     pub motor: Motor,
     pub local: Mutex<Local>,
     pub data: PathBuf,
+    /// What the companions share (`common`): the activity log, the agenda, the board of notes.
+    pub common: PathBuf,
     pub role: Mutex<Role>,
     /// Brain's view: the computer her body is on.
     pub body_on: Mutex<String>,
@@ -170,14 +274,19 @@ impl Core {
         let llm = Llm { url: motor.url(), model: "local".into() };
         let me = net.id.clone();
         lang::set_ui(mind.lang());
+        let common = crate::common::dir(&mind.character().root_of(&data));
+        // Resting when the app opens: her body starts asleep, not standing.
+        let rest = if mind.config.reposo { "Sleep" } else { "Relax" };
         Core {
+            common,
+            who: mind.character(),
             mind: Mutex::new(mind),
             llm,
             app,
             busy: AtomicBool::new(false),
             told_unknown: Mutex::new(Vec::new()),
             eyes: Mutex::new(Eyes::default()),
-            body: Mutex::new(Body { x: 0.0, target: None, rest: "Relax", idle_until: unix_now() + 20.0, leaving: None }),
+            body: Mutex::new(Body { x: 0.0, target: None, rest, idle_until: unix_now() + 20.0, leaving: None }),
             sensor: Mutex::new(crate::sensor::Sensor::default()),
             said: AtomicU64::new(0),
             net,
@@ -228,7 +337,10 @@ impl Core {
     // ── events ──
 
     /// Shown on this computer and, from the brain, on every linked one.
+    /// Shown on this computer and, from the brain, on every linked one. Every event says which
+    /// companion it is about (`who`): her own window on the desktop listens only to hers.
     pub(crate) fn emit(&self, ev: &str, v: Value) {
+        let v = self.tagged(v);
         let _ = self.app.emit(ev, v.clone());
         if self.is_brain() && !lock(&self.linked).is_empty() {
             lock(&self.outbox).push(json!([ev, v]));
@@ -236,7 +348,32 @@ impl Core {
     }
 
     fn emit_local(&self, ev: &str, v: Value) {
-        let _ = self.app.emit(ev, v);
+        let _ = self.app.emit(ev, self.tagged(v));
+    }
+
+    fn tagged(&self, mut v: Value) -> Value {
+        if let Some(o) = v.as_object_mut() {
+            o.entry("who").or_insert_with(|| json!(self.who.id));
+        }
+        v
+    }
+
+    /// Her body on the desktop: the one chosen on this computer, or her character's default.
+    pub fn body(&self) -> &'static str {
+        match lock(&self.local).cuerpo.as_str() {
+            "spine" => "spine",
+            "pixel" => "pixel",
+            _ => self.who.body,
+        }
+    }
+
+    /// The label of her window on the desktop (Kal'tsit's keeps its first name).
+    pub fn overlay_label(&self) -> String {
+        if self.who.id == crate::character::KALTSIT.id {
+            "overlay".into()
+        } else {
+            format!("overlay-{}", self.who.id)
+        }
     }
 
     fn status(&self, s: &str) {
@@ -284,7 +421,12 @@ impl Core {
                 "puerto": l.puerto, "modelo": l.llama.modelo,
             },
             "vecinos": { "izquierda": l.vecinos.izquierda, "derecha": l.vecinos.derecha },
-            "equipos": self.net.alive(),
+            "equipos": self.net.everyone().into_iter().map(|p| {
+                let mine = p.status.lead() == self.who.id;
+                let mut v = json!(p);
+                v["mia"] = json!(mine);
+                v
+            }).collect::<Vec<_>>(),
             "propuesta": proposal.map(|(id, name)| json!({ "id": id, "nombre": name })),
             "esperando": lock(&self.asked).clone(),
             "vinculados": self.net.vinculos().iter().filter(|v| v.confirmado).map(|v| json!({
@@ -324,7 +466,7 @@ impl Core {
     // ── body ──
 
     fn overlay(&self) -> Option<WebviewWindow> {
-        self.app.get_webview_window("overlay")
+        self.app.get_webview_window(&self.overlay_label())
     }
 
     /// Work area of the primary monitor (she lives there on each computer) and the overlay's own
@@ -524,7 +666,7 @@ impl Core {
     // ── memory across computers ──
 
     /// Saves (brain only) and sends what changed to every linked computer.
-    fn persist(&self) {
+    pub fn persist(&self) {
         if !self.is_brain() {
             return;
         }
@@ -532,6 +674,9 @@ impl Core {
             Ok(f) => f,
             Err(e) => return self.emit("k:error", json!({ "text": Ui::ErrSaveMemory.say(&[&e.to_string()]) })),
         };
+        // Her plans go to the shared agenda.
+        let plans: Vec<crate::common::Plan> = self.mind().upcoming().into_iter().map(|(u, label, texto)| crate::common::Plan { u, label, texto, de: self.who.id.into() }).collect();
+        crate::common::export_agenda(self.common.parent().unwrap_or(&self.common), self.who.id, &plans);
         let peers: Vec<String> = lock(&self.linked).iter().cloned().collect();
         for p in peers {
             self.replicate(&p, &files);
@@ -705,14 +850,29 @@ impl Core {
     pub fn voice_setup(&self) -> Result<crate::voice::Setup, String> {
         let v = lock(&self.local).voz.clone();
         let m = crate::catalog::Manifest::load();
-        let id = if v.id.is_empty() {
-            let root = m.root();
-            let mut voices: Vec<&crate::catalog::Item> = m.elementos.iter().filter(|i| i.voz.is_some() && i.installed(&root)).collect();
+        let root = m.root();
+        let is_other_clone = |id: &str, item| self.who.is_other_clone(id, item);
+        let suggested = self.who.voice.iter().copied().find(|id| {
+            !is_other_clone(id, m.item(id)) && m.elementos.iter().any(|i| i.id == *id && i.installed(&root))
+        });
+        let chosen = if !v.id.is_empty() && !is_other_clone(&v.id, m.item(&v.id)) {
+            Some(v.id)
+        } else {
+            None
+        };
+        let id = if let Some(id) = chosen {
+            id
+        } else if let Some(id) = suggested {
+            id.to_string()
+        } else {
+            let mut voices: Vec<&crate::catalog::Item> = m
+                .elementos
+                .iter()
+                .filter(|i| i.voz.is_some() && i.installed(&root) && !is_other_clone(&i.id, Some(i)))
+                .collect();
             // Her own (cloned) voice first, then the light ones.
             voices.sort_by_key(|i| (i.voz.as_ref().is_none_or(|v| v.referencia.is_none()), i.nivel != "ligero"));
             voices.first().map(|i| i.id.clone()).ok_or("no hay ninguna voz descargada (Modelos → Voz)")?
-        } else {
-            v.id
         };
         crate::voice::setup(&m, &id, v.velocidad)
     }
@@ -732,19 +892,23 @@ impl Core {
         if s.idioma != lang {
             return Some(s.idioma);
         }
-        crate::voice::say(s, text);
+        // Queued after whatever is playing: a new message stops her voice already.
+        crate::voice::say(s, text, self.who.id, false);
         None
     }
 
     /// Her reply as she would say it out loud in English, for a voice that speaks English (her
     /// own, cloned from the game). On the analysis slot, so the chat's cached prompt stays.
     fn in_english(&self, text: &str) -> Option<String> {
+        let name = self.mind().character().name;
         let messages = vec![
             Msg::text(
                 "system",
-                "You turn what Kal'tsit (Arknights) just said in Spanish into what she says out loud in English: \
-the same meaning, in her voice from the game, dry and precise, never longer than the original. \
-Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add anything. Answer only with JSON.",
+                format!(
+                    "You turn what {name} (Arknights) just said in Spanish into what she says out loud in English: \
+the same meaning, in her voice from the game, never longer than the original. \
+Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add anything. Answer only with JSON."
+                ),
             ),
             Msg::text("user", crate::mind::strip_actions(text)),
         ];
@@ -784,7 +948,17 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         let v = lock(&self.local).voz.clone();
         let setup = self.voice_setup();
         let m = crate::catalog::Manifest::load();
-        let name = setup.as_ref().ok().and_then(|s| m.elementos.iter().find(|i| i.voz.as_ref().is_some_and(|z| m.root().join(&z.carpeta) == s.dir)).map(|i| (i.id.clone(), i.nombre.clone())));
+        let name = setup.as_ref().ok().and_then(|s| {
+            m.elementos
+                .iter()
+                .find(|i| {
+                    i.voz.as_ref().is_some_and(|z| {
+                        m.root().join(&z.carpeta) == s.dir
+                            && z.referencia.as_ref().map(|r| m.root().join(r)) == s.reference
+                    })
+                })
+                .map(|i| (i.id.clone(), i.nombre.clone()))
+        });
         json!({
             "activa": v.activa,
             "velocidad": v.velocidad,
@@ -949,7 +1123,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
                         return core.emit("k:error", json!({ "text": Ui::ErrStillBusy.say(&[]) }));
                     }
                     let _free = Free(&core.busy);
-                    if let Err(e) = core.answer_with_ghosts(&u.said, &u.ghosts, u.voz.as_ref(), u.sonido.as_ref()) {
+                    if let Err(e) = core.answer_with_ghosts(&u.said, &u.ghosts, u.voz.as_ref(), u.sonido.as_ref(), true, &[]) {
                         core.status("");
                         core.emit("k:error", json!({ "text": e }));
                     }
@@ -1034,10 +1208,13 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
 
     #[allow(dead_code)]
     pub fn answer(&self, text: &str) -> Result<(), String> {
-        self.answer_with_ghosts(text, &[], None, None)
+        self.answer_with_ghosts(text, &[], None, None, true, &[]).map(|_| ())
     }
 
-    fn answer_with_ghosts(&self, text: &str, ghosts: &[String], voz: Option<&Value>, sonido: Option<&Value>) -> Result<(), String> {
+    /// Her answer to a message, which she learns from. In a group, `echo`: she is the first to
+    /// answer, so the message goes to the chat through her (once); `others`: what the companions
+    /// who answered before her said, seen in her window before she answers. Returns her words.
+    fn answer_with_ghosts(&self, text: &str, ghosts: &[String], voz: Option<&Value>, sonido: Option<&Value>, echo: bool, others: &[(String, String)]) -> Result<String, String> {
         if self.is_brain() && !self.motor.healthy() {
             self.status(&Ui::StWaking.say(&[]));
             if let Err(e) = self.motor.start(Duration::from_secs(240)) {
@@ -1061,11 +1238,22 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
                 m.say(Speaker::Narrator, &line, &[]);
             }
             m.say(Speaker::User, text, &[]);
+            let l = m.lang();
+            // Notes the others left her, read now (once).
+            for n in crate::common::take_notes(self.common.parent().unwrap_or(&self.common), self.who.id) {
+                let from = crate::character::get(&n.de).map(|c| c.name).unwrap_or(n.de.as_str()).to_string();
+                m.say(Speaker::Narrator, &crate::lang::note_from(l, &from, &n.texto), &[]);
+            }
+            for (name, said) in others {
+                m.say(Speaker::Narrator, &crate::lang::group_said(l, name, said), &[]);
+            }
         }
-        for g in ghosts {
-            self.emit("k:log", json!({ "role": "ghost", "text": g }));
+        if echo {
+            for g in ghosts {
+                self.emit("k:log", json!({ "role": "ghost", "text": g }));
+            }
+            self.emit("k:log", json!({ "role": "user", "text": text, "voz": voz }));
         }
-        self.emit("k:log", json!({ "role": "user", "text": text, "voz": voz }));
         self.status(&Ui::StReading.say(&[]));
         let ex = self.mind().extraction(text, &[]);
         let analysis = self.llm.chat_json(&ex.messages, &mind::extraction_schema_with(&ex.sectors), SLOT_ANALYSIS, 0.0, 300).ok();
@@ -1075,7 +1263,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         }
         let image = self.current_screen();
         let seen = lock(&self.eyes).seen.clone();
-        self.status(&Ui::StReplying.say(&[]));
+        self.status(&Ui::StReplying.say(&[self.mind().character().name]));
         let (prepared, temperature, plasticity) = {
             let mut m = self.mind();
 
@@ -1117,7 +1305,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         lock(&self.eyes).lived += 1;
         self.status("");
         self.emit("k:state", self.state_json());
-        Ok(())
+        Ok(clean_reply)
     }
 
     /// The unknown voices of `turns` she was already told about; the others are marked as told
@@ -1134,6 +1322,97 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         before
     }
 
+    /// A companion who is not the lead thinks on this computer as soon as the lead does (they
+    /// share its model server); the link with other computers stays the lead's.
+    pub fn think_alongside(self: &Arc<Self>, lead: &Arc<Core>) {
+        let (me, lead) = (self.clone(), lead.clone());
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(3));
+            if me.role() != Role::Brain && lead.role() == Role::Brain {
+                if let Err(e) = me.become_brain(None) {
+                    eprintln!("{}: {e}", me.who.name);
+                }
+            }
+        });
+    }
+
+    // ── what is worked on (activity) ──
+
+    /// A session ended: into the person's log, and into her memory if it was long.
+    fn activity_closed(&self, person: &str, s: crate::activity::Session) {
+        if let Err(e) = crate::activity::append(&self.common, person, &s) {
+            eprintln!("actividad: {e}");
+        }
+        if s.activo >= crate::activity::MEMORABLE_S {
+            let mut m = self.mind();
+            let l = m.lang();
+            let (label, body) = crate::lang::activity_episode(l, person, &s.app, &s.titulo, &crate::activity::hm(s.activo, l));
+            m.record_activity(&label, &body);
+            drop(m);
+            self.persist();
+        }
+    }
+
+    /// Each past day with a log and no summary yet gets one in her memory (once: a mark file
+    /// next to the day's log says it is done).
+    fn summarise_days(&self, person: &str) {
+        let today = crate::clock::now_local().map(|l| format!("{:04}-{:02}-{:02}", l.year, l.month, l.day)).unwrap_or_default();
+        let dir = self.common.join("actividad").join(crate::activity::folder_of(person));
+        let mut wrote = false;
+        for (day, total) in crate::activity::days(&self.common, person) {
+            let mark = dir.join(format!("{day}.resumen"));
+            if day >= today || mark.exists() || total < 60.0 {
+                continue;
+            }
+            let mut m = self.mind();
+            let l = m.lang();
+            let apps: Vec<String> = crate::activity::by_app(&crate::activity::day(&self.common, person, &day))
+                .iter()
+                .take(5)
+                .map(|(app, secs, titles)| {
+                    let top: Vec<&str> = titles.iter().take(2).map(|t| t.0.as_str()).collect();
+                    format!("{app} {} ({})", crate::activity::hm(*secs, l), top.join(", "))
+                })
+                .collect();
+            let date = crate::clock::parse(&day).and_then(crate::clock::to_local).map(|d| crate::clock::long(&d, l)).unwrap_or(day.clone());
+            let (label, body) = crate::lang::day_summary(l, person, &date, &crate::activity::hm(total, l), &apps);
+            m.record_activity(&label, &body);
+            drop(m);
+            let _ = std::fs::write(&mark, "");
+            wrote = true;
+        }
+        if wrote {
+            self.persist();
+        }
+    }
+
+    /// Back after an absence: she tells them where they left off (if she is awake, thinks on this
+    /// computer and is not busy answering something).
+    fn welcome_back(self: &Arc<Self>, person: &str, away_s: f64, left: f64) {
+        if self.mind().config.reposo || !self.is_brain() || self.busy.load(Ordering::Acquire) {
+            return;
+        }
+        let items = crate::activity::left_off(&crate::activity::before(&self.common, person, left, 2.0));
+        if items.is_empty() {
+            return;
+        }
+        let core = self.clone();
+        let person = person.to_string();
+        std::thread::spawn(move || {
+            if core.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() || !core.motor.healthy() {
+                return;
+            }
+            let _free = Free(&core.busy);
+            let l = core.mind().lang();
+            let lines: Vec<String> = items.iter().map(|s| format!("«{}» en {} ({})", s.titulo, s.app, crate::activity::hm(s.activo, l))).collect();
+            let hint = crate::lang::welcome_back_hint(l, &person, &crate::clock::span(away_s, l), &lines);
+            if let Err(e) = core.reply_with_hint(crate::lang::back_placeholder(l), &hint, 120) {
+                core.status("");
+                core.emit("k:error", json!({ "text": e }));
+            }
+        });
+    }
+
     // ── the open microphone ──
 
     /// The open microphone sent something: a whole turn (sent as if dictated and sent), or a
@@ -1142,6 +1421,9 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         let voz = serde_json::to_value(&f.turns).ok().filter(|v| v.as_array().is_some_and(|a| !a.is_empty()));
         if !f.still_talking {
             let u = crate::sensor::Utterance { said: f.text.clone(), ghosts: Vec::new(), voz, sonido: Some(f.sound_json()) };
+            if let Some(crew) = self.app.try_state::<Arc<Crew>>() {
+                return crew.hear_utterance(u);
+            }
             return self.hear_utterance(u);
         }
         match self.role() {
@@ -1183,7 +1465,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
             let decision = read.as_ref().and_then(|v| v["decision"].as_str()).unwrap_or("esperar").to_string();
             self.emit("k:monologue", json!({ "read": read, "decision": decision }));
             if decision == "esperar" {
-                self.status(&Ui::StListening.say(&[]));
+                self.status(&Ui::StListening.say(&[self.mind().character().name]));
                 self.persist();
                 return;
             }
@@ -1199,19 +1481,26 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
 
     /// The quick read: how charged the piece is and what she should do, by the model.
     fn read_monologue(&self, text: &str, sonido: &Value) -> Option<Value> {
-        read_monologue_with(&self.llm, self.mind().lang(), text, sonido)
+        let (l, name) = { let m = self.mind(); (m.lang(), m.character().name) };
+        read_monologue_with(&self.llm, l, name, text, sonido)
     }
 
     /// Her answer to a monologue piece already in her window, led by a line of narration.
     #[allow(clippy::too_many_arguments)]
     fn reply_to_monologue(&self, text: &str, decision: &str, words: usize, emotion: &str, intensity: f64, at_her: bool, max_tokens: u32) -> Result<(), String> {
+        let hint = crate::lang::monologue_hint(self.mind().lang(), decision, words, emotion, intensity, at_her);
+        self.reply_with_hint(text, &hint, max_tokens).map(|_| ())
+    }
+
+    /// Her answer to what is already in her window, led by a line of narration (`hint`); `text`
+    /// is what the episode of this turn is about.
+    fn reply_with_hint(&self, text: &str, hint: &str, max_tokens: u32) -> Result<String, String> {
         let image = self.current_screen();
         let seen = lock(&self.eyes).seen.clone();
-        self.status(&Ui::StReplying.say(&[]));
+        self.status(&Ui::StReplying.say(&[self.mind().character().name]));
         let (prepared, temperature) = {
             let mut m = self.mind();
-            let hint = crate::lang::monologue_hint(m.lang(), decision, words, emotion, intensity, at_her);
-            m.say(Speaker::Narrator, &hint, &[]);
+            m.say(Speaker::Narrator, hint, &[]);
             let (wt, desc) = (m.hormones.window_tokens(), m.mood());
             (m.prepare_reply(wt, &desc, seen.as_deref(), image.as_deref()), m.hormones.temperature())
         };
@@ -1223,7 +1512,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         self.persist();
         self.status("");
         self.emit("k:state", self.state_json());
-        Ok(())
+        Ok(clean_reply)
     }
 
 
@@ -1243,7 +1532,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         let note = crate::lang::silence_note(self.mind().lang(), &user);
         self.mind().say(Speaker::Sense, &note, &[]);
         self.emit("k:log", json!({ "role": "sense", "text": note }));
-        self.status(&Ui::StWatching.say(&[]));
+        self.status(&Ui::StWatching.say(&[self.mind().character().name]));
         let (prepared, temperature) = {
             let m = self.mind();
 
@@ -1382,6 +1671,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
             ev
         };
         self.persist();
+        self.leave_notes(&ex.messages);
         let l = lang::ui();
         for e in &events {
             let Some(verb) = lang::log_verb(e.action) else { continue };
@@ -1392,6 +1682,25 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         self.status("");
         self.emit("k:state", self.state_json());
         Ok(())
+    }
+
+    /// After reflecting, with other companions here: a short note to each, if there is something
+    /// she should know (what she lived lately is the same context the reflection read).
+    fn leave_notes(&self, reflection: &[Msg]) {
+        let Some(crew) = self.app.try_state::<Arc<Crew>>() else { return };
+        let Some(lived) = reflection.last() else { return };
+        let l = self.mind().lang();
+        let user = self.mind().user.clone();
+        for other in crew.all.iter().filter(|c| c.who.id != self.who.id) {
+            let messages = vec![Msg::text("system", crate::lang::note_prompt(l, self.who.name, other.who.name, &user)), lived.clone()];
+            let schema = json!({ "type": "object", "properties": { "nota": { "type": "string" } }, "required": ["nota"] });
+            if let Ok(v) = self.llm.chat_json(&messages, &schema, SLOT_ANALYSIS, 0.3, 120) {
+                let note = v["nota"].as_str().unwrap_or("").trim().to_string();
+                if !note.is_empty() {
+                    crate::common::leave_note(self.common.parent().unwrap_or(&self.common), self.who.id, other.who.id, &note, unix_now());
+                }
+            }
+        }
     }
 
     /// First launch (see `Mind::first_run`): the memory is rebuilt from the base seed of the chosen
@@ -1476,8 +1785,20 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
             if self.is_brain() {
                 self.status(&Ui::StWaking.say(&[]));
                 let core = self.clone();
+                // A companion who is not the lead shares the lead's model server: she waits for
+                // it instead of starting a second one on the same port.
+                let shares = self.app.try_state::<Arc<Crew>>().is_some_and(|c| c.lead().who.id != self.who.id);
                 std::thread::spawn(move || {
-                    if let Err(e) = core.motor.start(Duration::from_secs(240)) {
+                    let started = if shares {
+                        let end = std::time::Instant::now() + Duration::from_secs(240);
+                        while !core.motor.healthy() && std::time::Instant::now() < end {
+                            std::thread::sleep(Duration::from_millis(500));
+                        }
+                        if core.motor.healthy() { Ok(()) } else { Err(Ui::ErrModelStart.say(&["timeout"])) }
+                    } else {
+                        core.motor.start(Duration::from_secs(240))
+                    };
+                    if let Err(e) = started {
                         core.status("");
                         core.emit("k:error", json!({ "text": Ui::ErrWake.say(&[&e]) }));
                     } else {
@@ -1497,6 +1818,14 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
     pub fn handle(self: &Arc<Self>, method: &str, path: &str, from: &str, v: Value) -> Result<Value, (u16, String)> {
         let bad = |e: String| (400u16, e);
         let brain_only = || if self.is_brain() { Ok(()) } else { Err((409u16, "este equipo no es el cerebro".to_string())) };
+        // The shared bank is the household's; everything else is hers alone: a computer where
+        // another companion leads never touches her memory, body or brain.
+        if (method, path) == ("GET", "/comun") {
+            return Ok(json!(crate::common::bank(self.common.parent().unwrap_or(&self.common))));
+        }
+        if self.net.everyone().iter().any(|p| p.id == from) && self.net.peer(from).is_none() {
+            return Err((403, format!("en ese equipo vive otra compañera, no {}", self.who.name)));
+        }
         match (method, path) {
             ("GET", "/memoria") => Ok(json!({ "files": files_to_json(&self.mind().files()) })),
             ("POST", "/memoria") => {
@@ -1848,6 +2177,33 @@ pub fn spawn_mind_clock(core: Arc<Core>) {
     });
 }
 
+/// Every few seconds: the window in front, into sessions of work for the person at this computer
+/// (`activity`). Past days get their summary in her memory; coming back after an absence, she
+/// says where they left off.
+pub fn spawn_activity(core: Arc<Core>) {
+    std::thread::spawn(move || {
+        let mut tracker = crate::activity::Tracker::default();
+        let mut summarised = String::new();
+        loop {
+            std::thread::sleep(Duration::from_secs_f64(crate::activity::SAMPLE_S));
+            let cfg = lock(&core.local).actividad.clone();
+            let person = core.mind().user.clone();
+            let sample = if cfg.activa { crate::activity::sample().filter(|s| !crate::activity::private(&s.app, &s.title, &cfg.excluir)) } else { None };
+            for ev in tracker.feed(unix_now(), sample) {
+                match ev {
+                    crate::activity::Event::Closed(s) => core.activity_closed(&person, s),
+                    crate::activity::Event::Back { away_s, left } => core.welcome_back(&person, away_s, left),
+                }
+            }
+            let today = crate::clock::now_local().map(|l| format!("{:04}-{:02}-{:02}", l.year, l.month, l.day)).unwrap_or_default();
+            if today != summarised {
+                core.summarise_days(&person);
+                summarised = today;
+            }
+        }
+    });
+}
+
 /// Every 3 s on the computer her body is on: has this screen changed enough to look again?
 pub fn spawn_eyes(core: Arc<Core>) {
     std::thread::spawn(move || loop {
@@ -1880,6 +2236,15 @@ pub fn spawn_eyes(core: Arc<Core>) {
         // she waits for it quietly and looks once it is ready.
         if role == Role::Brain && !core.motor.healthy() {
             continue;
+        }
+        // Several companions take turns at looking: one look per `min_gap` among them all.
+        {
+            static LAST_LOOK: AtomicU64 = AtomicU64::new(0);
+            let now = unix_now() as u64;
+            let last = LAST_LOOK.load(Ordering::Acquire);
+            if (now.saturating_sub(last) as f64) < min_gap || LAST_LOOK.compare_exchange(last, now, Ordering::AcqRel, Ordering::Acquire).is_err() {
+                continue;
+            }
         }
         let Some(jpeg) = shot.jpeg_b64(SHOT_W) else { continue };
         let sent = match role {
@@ -2002,12 +2367,12 @@ pub fn spawn_body(core: Arc<Core>) {
 /// The quick read of a monologue piece by the model at `llm`: emotion, intensity, whether it is
 /// aimed at her, whether it is venting, and what she should do (`esperar` | `breve` |
 /// `interrumpir`).
-pub fn read_monologue_with(llm: &Llm, l: crate::lang::Lang, text: &str, sonido: &Value) -> Option<Value> {
+pub fn read_monologue_with(llm: &Llm, l: crate::lang::Lang, name: &str, text: &str, sonido: &Value) -> Option<Value> {
     let user = match l {
         crate::lang::Lang::Es => format!("Lo que lleva dicho:\n{text}\n\nCómo suena: {}", crate::lang::monologue_sound(l, sonido)),
         crate::lang::Lang::En => format!("What they have said:\n{text}\n\nHow it sounds: {}", crate::lang::monologue_sound(l, sonido)),
     };
-    let messages = vec![Msg::text("system", crate::lang::monologue_reading_prompt(l)), Msg::text("user", user)];
+    let messages = vec![Msg::text("system", crate::lang::monologue_reading_prompt(l, name)), Msg::text("user", user)];
     let schema = json!({
         "type": "object",
         "properties": {
@@ -2020,4 +2385,18 @@ pub fn read_monologue_with(llm: &Llm, l: crate::lang::Lang, text: &str, sonido: 
         "required": ["emocion", "intensidad", "contra_ella", "desahogo", "decision"]
     });
     llm.chat_json(&messages, &schema, SLOT_ANALYSIS, 0.2, 120).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_message_names_a_companion_by_her_name_or_id() {
+        use crate::character::{KALTSIT, LAPPLAND};
+        assert!(names("Oye, LAPPLAND, ¿qué opinas?", &LAPPLAND));
+        assert!(names("kal'tsit, revisa esto", &KALTSIT));
+        assert!(names("que lo diga kaltsit", &KALTSIT), "her id counts too");
+        assert!(!names("¿qué opináis las dos?", &LAPPLAND));
+    }
 }

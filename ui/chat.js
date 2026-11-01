@@ -4,7 +4,28 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const $ = (id) => document.getElementById(id);
-const state = { user: "", live: new Map(), busy: false, status: "", last: null };
+// `crew`: the companions in this chat ({id, name, color}); each answer says whose (`who`).
+const state = { user: "", live: new Map(), busy: false, status: "", last: null, crew: [] };
+const member = (id) => state.crew.find((c) => c.id === id);
+// Every panel that is one companion's (memory, compass, voice) asks whose with this row of chips;
+// with a single companion it is not shown. `extra`: more chips after them (the shared bank).
+function crewSwitch(current, onPick, extra = []) {
+  const box = document.createElement("div");
+  box.className = "crew-switch";
+  const all = [...state.crew, ...extra];
+  if (all.length < 2) return box;
+  for (const c of all) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `crew-chip${c.id === current ? " on" : ""}`;
+    b.textContent = c.name;
+    if (c.color) b.style.setProperty("--c", c.color);
+    b.onclick = () => onPick(c.id);
+    box.append(b);
+  }
+  return box;
+}
+const leadId = () => (state.crew[0] ? state.crew[0].id : null);
 
 // Name, abbreviation and meaning come from the dictionary (hormone.<key>[.abbr|.what]).
 const HORMONES = [
@@ -64,7 +85,9 @@ function add(role, text, opts = {}) {
   m.className = `msg ${role}${opts.alone ? " alone" : ""}`;
   const who = document.createElement("div");
   who.className = "who";
-  who.textContent = (role === "user" || role === "ghost") ? state.user : role === "assistant" ? "Kal'tsit" : tOr(`who.${role}`, role);
+  const her = role === "assistant" ? member(opts.who) || state.crew[0] : null;
+  who.textContent = (role === "user" || role === "ghost") ? state.user : role === "assistant" ? (her ? her.name : "Kal'tsit") : tOr(`who.${role}`, role);
+  if (her) m.style.setProperty("--her", her.color);
   const body = document.createElement("div");
   body.className = "body";
   renderBody(body, text);
@@ -252,6 +275,7 @@ function repaintLanguage() {
 
 function applyState(s) {
   state.last = s;
+  if (s.crew) state.crew = s.crew;
   // The language changed somewhere else (another window or computer): follow it.
   if (!s.primer_arranque && s.idioma && s.idioma !== getLang()) {
     setLang(s.idioma);
@@ -313,10 +337,12 @@ async function boot() {
     setLang(s.idioma);
     repaintLanguage();
   }
+  const first = await invoke("state");
+  state.crew = first.crew || [];
   const h = await invoke("history");
   state.user = h.user;
   add("assistant", h.opening);
-  for (const m of h.messages) add(m.role, m.text);
+  for (const m of h.messages) add(m.role, m.text, { who: m.who });
   applyState(await invoke("state"));
 }
 
@@ -413,22 +439,24 @@ function voiceChips(msg, turns, still) {
   }
   msg.el.append(box);
 }
+// Each companion numbers her own answers: an answer is hers and its number.
+const liveKey = (p) => `${p.who || ""}:${p.id}`;
 listen("k:start", (e) => {
-  const m = add("assistant", "…", { alone: !!e.payload.alone });
-  state.live.set(e.payload.id, { msg: m, acc: "" });
+  const m = add("assistant", "…", { alone: !!e.payload.alone, who: e.payload.who });
+  state.live.set(liveKey(e.payload), { msg: m, acc: "" });
 });
 listen("k:tok", (e) => {
-  const l = state.live.get(e.payload.id);
+  const l = state.live.get(liveKey(e.payload));
   if (!l) return;
   l.acc += e.payload.v;
   renderBody(l.msg.body, l.acc);
   scroll();
 });
 listen("k:said", (e) => {
-  const l = state.live.get(e.payload.id);
+  const l = state.live.get(liveKey(e.payload));
   if (!l) return;
   renderBody(l.msg.body, e.payload.text);
-  state.live.delete(e.payload.id);
+  state.live.delete(liveKey(e.payload));
   scroll();
 });
 listen("k:learned", (e) => {
@@ -436,7 +464,8 @@ listen("k:learned", (e) => {
   if (last) learnedChips({ el: last }, e.payload.events);
 });
 listen("k:error", (e) => add("error", e.payload.text));
-listen("k:state", (e) => applyState(e.payload));
+// The header shows the lead's state; the others' changes do not take it over.
+listen("k:state", (e) => { if (!e.payload.who || !state.crew.length || e.payload.who === state.crew[0].id) applyState(e.payload); });
 
 // What her body does in Minecraft (the mod reports every change of state).
 // The words are in the dictionary (mc.<STATE>).
@@ -637,6 +666,8 @@ const mem = {
   items: [],
   pos: new Map(),
   shown: new Map(), // sectorId -> how many loose memories are drawn (paged by LEAF_PAGE)
+  who: null, // whose memory (null: the lead's)
+  common: false, // «Comunal» is open
 };
 // A sector with more loose memories than this shows the newest ones and a «+N más» node.
 const LEAF_PAGE = 24;
@@ -1431,7 +1462,328 @@ $("memCollapse").onclick = () => {
 };
 $("memCenter").onclick = () => fitGraph();
 // Her memory in 3D, in its own window (santuario, hélice, arboleda, constelación; read only).
-$("memViewer").onclick = () => invoke("open_viewer").catch((e) => add("error", String(e)));
+$("memViewer").onclick = () => invoke("open_viewer", { who: mem.who }).catch((e) => add("error", String(e)));
+
+// Whose memory: each companion has her own (never shared); «Comunal» is what they share.
+function paintMemWho() {
+  const cur = mem.common ? "comun" : mem.who || leadId();
+  $("memWho").replaceChildren(crewSwitch(cur, pickMemWho, [{ id: "comun", name: t("common.chip") }]));
+}
+async function pickMemWho(id) {
+  if (id === "comun") {
+    mem.common = true;
+    paintMemWho();
+    return openCommon();
+  }
+  closeCommon();
+  if (id === (mem.who || leadId())) return paintMemWho();
+  mem.who = id === leadId() ? null : id;
+  mem.model = null;
+  mem.search = "";
+  $("memSearch").value = "";
+  paintMemWho();
+  await loadMemoryGraph(false);
+  if (people.open) openPeople();
+}
+
+// ── Memoria → Comunal: the shared bank ──
+// Everyone's upcoming plans, the notes they leave each other (also between computers) and where
+// each one lives. Read only.
+async function openCommon() {
+  const box = $("memCommon");
+  box.classList.remove("hidden");
+  box.replaceChildren(el("div", "loading", "…"));
+  let b;
+  try { b = await invoke("common_bank"); } catch (e) { box.textContent = String(e); return; }
+  const name = (id) => (member(id) ? member(id).name : id.charAt(0).toUpperCase() + id.slice(1));
+  const dot = (id) => {
+    const d = el("span", "who-dot");
+    if (member(id)) d.style.setProperty("--c", member(id).color);
+    return d;
+  };
+  const top = el("div", "people-top");
+  top.append(el("h3", "", t("common.title")));
+  box.replaceChildren(top, el("div", "hint", t("common.hint")));
+  const cols = el("div", "common-cols");
+  // Where each one lives.
+  const where = el("section");
+  where.append(el("h4", "", t("common.where")));
+  const wl = el("ul");
+  const here = el("li");
+  here.append(el("b", "", t("common.here")), document.createTextNode(": " + state.crew.map((c) => c.name).join(", ")));
+  wl.append(here);
+  for (const e of b.equipos || []) {
+    const li = el("li");
+    li.append(el("b", "", e.equipo), document.createTextNode(": " + ((e.crew || []).length ? e.crew.map(name).join(", ") : name("kaltsit"))));
+    wl.append(li);
+  }
+  where.append(wl);
+  if (!(b.equipos || []).length) where.append(el("p", "hint", t("common.alone")));
+  // The agenda.
+  const ag = el("section");
+  ag.append(el("h4", "", t("common.agenda")));
+  const now = Date.now() / 1000;
+  const next = b.agenda.filter((p) => p.u > now - 3600);
+  if (!next.length) ag.append(el("p", "hint", t("common.agenda.none")));
+  const al = el("ul");
+  for (const p of next.slice(0, 40)) {
+    const li = el("li");
+    const when = new Date(p.u * 1000).toLocaleString(locale(), { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    li.append(dot(p.de), document.createTextNode(`${when} · ${p.label}`));
+    li.title = `${name(p.de)}${p.texto ? ": " + p.texto : ""}`;
+    al.append(li);
+  }
+  ag.append(al);
+  // The board.
+  const bo = el("section");
+  bo.append(el("h4", "", t("common.board")));
+  if (!b.notas.length) bo.append(el("p", "hint", t("common.board.none")));
+  const nl = el("ul");
+  for (const n of b.notas.slice(0, 40)) {
+    const li = el("li", n.leida ? "read" : "");
+    li.append(dot(n.de), document.createTextNode(`${name(n.de)} → ${name(n.para)}: ${n.texto}`));
+    li.title = `${new Date(n.at * 1000).toLocaleString(locale())} · ${n.leida ? t("common.read") : t("common.unread")}`;
+    nl.append(li);
+  }
+  bo.append(nl);
+  cols.append(where, ag, bo);
+  box.append(cols);
+}
+function closeCommon() {
+  mem.common = false;
+  $("memCommon").classList.add("hidden");
+}
+listen("k:comun", () => { if (mem.common && isOpen("memory")) openCommon(); });
+
+// ── Memoria → Personas: one section per person ──
+// What she knows of them (what their node is linked to), their plans (dated or scheduled memories
+// linked to them; for the primary user, all of hers), and for whoever works at this computer, a
+// calendar of their days: how long they worked (`activity`, per program and window) and what was
+// planned. Read only, like the rest of Memoria.
+const people = { open: false, g: null, list: [], who: null, month: null, days: new Map(), day: null, bank: { agenda: [], notas: [] } };
+
+function peopleOf(g) {
+  const user = (state.user || "").trim();
+  // Not her core's axioms about herself ("Quién eres"): people she knows.
+  const persons = g.nodes.filter((n) => n.k === "persona" && !n.terra && !n.core).sort((a, b) => b.deg - a.deg);
+  // The user's node may carry more than the name ("Ana, quien te dio forma").
+  const named = (n) => {
+    const l = n.l.toLowerCase(), u = user.toLowerCase();
+    return !!u && (l === u || (l.startsWith(u) && !/\p{L}/u.test(l[u.length])));
+  };
+  const main = persons.find(named);
+  const list = [{ name: user || t("people.you"), node: main || null, primary: true }];
+  for (const n of persons) if (n !== main) list.push({ name: n.l, node: n, primary: false });
+  return list;
+}
+
+function neighbours(g, id) {
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const out = new Map();
+  for (const e of g.edges) {
+    if (e.k === "pertenece") continue;
+    const o = e.f === id ? e.t : e.t === id ? e.f : null;
+    if (o != null && byId.has(o)) out.set(o, byId.get(o));
+  }
+  return [...out.values()];
+}
+
+/// The plans of a person: dated or scheduled memories linked to them (the primary user: all, and
+/// the shared agenda, so the plans told to any companion are here).
+function plansOf(g, p) {
+  const dated = (n) => n.u != null && !n.terra && (n.sched || n.dated);
+  const pool = p.primary ? g.nodes : p.node ? neighbours(g, p.node.id) : [];
+  const mine = pool.filter(dated);
+  if (p.primary) {
+    for (const a of people.bank.agenda) {
+      if (!mine.some((n) => Math.abs(n.u - a.u) < 60 && n.l.toLowerCase() === a.label.toLowerCase())) mine.push({ u: a.u, l: a.label, t: a.texto });
+    }
+  }
+  return mine.sort((a, b) => a.u - b.u);
+}
+
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function hm(secs) {
+  const m = Math.round(secs / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
+async function openPeople() {
+  people.open = true;
+  $("memPeople").classList.remove("hidden");
+  $("memPeopleBtn").classList.add("on");
+  try {
+    people.g = await invoke("memory_graph", { who: mem.who });
+  } catch (err) {
+    $("memPeople").textContent = String(err);
+    return;
+  }
+  people.list = peopleOf(people.g);
+  try { people.bank = await invoke("common_bank"); } catch {}
+  if (!people.who || !people.list.some((p) => p.name === people.who)) people.who = people.list[0].name;
+  if (!people.month) people.month = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  await loadPerson();
+}
+
+function closePeople() {
+  people.open = false;
+  $("memPeople").classList.add("hidden");
+  $("memPeopleBtn").classList.remove("on");
+}
+
+async function loadPerson() {
+  const p = people.list.find((x) => x.name === people.who);
+  people.days = new Map();
+  if (p && p.primary) {
+    try { for (const [d, s] of await invoke("activity_days", { person: p.name })) people.days.set(d, s); } catch {}
+  }
+  renderPeople();
+}
+
+function renderPeople() {
+  const box = $("memPeople");
+  box.textContent = "";
+  const top = el("div", "people-top");
+  top.append(el("h3", "", t("people.title")));
+  const close = el("button", "ghost", "×");
+  close.type = "button";
+  close.setAttribute("aria-label", t("people.close"));
+  close.onclick = closePeople;
+  top.append(close);
+  box.append(top);
+  const wrap = el("div", "people-wrap");
+  const list = el("nav", "people-list");
+  for (const p of people.list) {
+    const b = el("button", `people-item${p.name === people.who ? " on" : ""}`, p.name);
+    b.type = "button";
+    if (p.primary) b.append(el("span", "people-tag", t("people.primary")));
+    b.onclick = () => { people.who = p.name; people.day = null; loadPerson(); };
+    list.append(b);
+  }
+  wrap.append(list);
+  const p = people.list.find((x) => x.name === people.who);
+  const main = el("div", "people-main");
+  if (p) {
+    main.append(el("h2", "", p.name));
+    // What she knows.
+    const facts = p.node ? neighbours(people.g, p.node.id).filter((n) => n.k !== "episodio" && n.k !== "sector").sort((a, b) => b.chi - a.chi).slice(0, 24) : [];
+    main.append(el("h4", "", t("people.knows", { n: facts.length })));
+    if (!facts.length) main.append(el("p", "hint", t(p.node ? "people.knows.none" : "people.knows.noNode")));
+    const ul = el("ul", "people-facts");
+    for (const n of facts) {
+      const li = el("li", "", n.l);
+      li.title = n.t;
+      ul.append(li);
+    }
+    main.append(ul);
+    // The calendar: activity and plans.
+    const plans = plansOf(people.g, p);
+    main.append(calendar(p, plans));
+    if (people.day) main.append(dayPanel(p, plans));
+    // The board: notes the companions left each other.
+    if (people.bank.notas.length) {
+      main.append(el("h4", "", t("people.board")));
+      const ul = el("ul", "people-notes");
+      for (const n of people.bank.notas.slice(0, 20)) {
+        const from = member(n.de), to = member(n.para);
+        const li = el("li", "", `${from ? from.name : n.de} → ${to ? to.name : n.para}: ${n.texto}`);
+        li.title = new Date(n.at * 1000).toLocaleString(locale());
+        ul.append(li);
+      }
+      main.append(ul);
+    }
+  }
+  wrap.append(main);
+  box.append(wrap);
+}
+
+function calendar(p, plans) {
+  const sec = el("section", "people-cal");
+  const head = el("div", "people-cal-head");
+  const m = people.month;
+  const prev = el("button", "ghost", "‹");
+  const next = el("button", "ghost", "›");
+  prev.type = next.type = "button";
+  prev.onclick = () => { people.month = new Date(m.getFullYear(), m.getMonth() - 1, 1); renderPeople(); };
+  next.onclick = () => { people.month = new Date(m.getFullYear(), m.getMonth() + 1, 1); renderPeople(); };
+  head.append(prev, el("b", "", m.toLocaleDateString(locale(), { month: "long", year: "numeric" })), next);
+  sec.append(el("h4", "", t(p.primary ? "people.calendar" : "people.calendar.plans")), head);
+  const grid = el("div", "people-grid");
+  // Monday first.
+  const monday = new Date(2024, 0, 1);
+  for (let i = 0; i < 7; i++) grid.append(el("span", "people-wd", new Date(monday.getFullYear(), 0, 1 + i).toLocaleDateString(locale(), { weekday: "short" })));
+  const first = (m.getDay() + 6) % 7;
+  for (let i = 0; i < first; i++) grid.append(el("span", "people-day empty"));
+  const daysIn = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+  const today = dayKey(new Date());
+  const planDays = new Map();
+  for (const n of plans) {
+    const k = dayKey(new Date(n.u * 1000));
+    planDays.set(k, (planDays.get(k) || 0) + 1);
+  }
+  const max = Math.max(4 * 3600, ...people.days.values());
+  for (let d = 1; d <= daysIn; d++) {
+    const k = dayKey(new Date(m.getFullYear(), m.getMonth(), d));
+    const secs = people.days.get(k) || 0;
+    const c = el("button", `people-day${k === today ? " today" : ""}${k === people.day ? " on" : ""}`);
+    c.type = "button";
+    c.append(el("span", "people-dn", String(d)));
+    if (secs) {
+      c.style.setProperty("--work", (0.15 + 0.85 * Math.min(1, secs / max)).toFixed(2));
+      c.classList.add("worked");
+      c.append(el("span", "people-hours", hm(secs)));
+    }
+    if (planDays.has(k)) c.append(el("span", "people-dot", "•".repeat(Math.min(3, planDays.get(k)))));
+    c.title = [secs ? t("people.worked", { t: hm(secs) }) : "", planDays.has(k) ? t("people.planned", { n: planDays.get(k) }) : ""].filter(Boolean).join(" · ");
+    c.onclick = () => { people.day = people.day === k ? null : k; renderPeople(); };
+    grid.append(c);
+  }
+  sec.append(grid);
+  return sec;
+}
+
+function dayPanel(p, plans) {
+  const sec = el("section", "people-dayview");
+  const date = new Date(people.day + "T00:00");
+  sec.append(el("h4", "", date.toLocaleDateString(locale(), { weekday: "long", day: "numeric", month: "long" })));
+  const dayPlans = plans.filter((n) => dayKey(new Date(n.u * 1000)) === people.day);
+  if (dayPlans.length) {
+    const ul = el("ul", "people-plans");
+    for (const n of dayPlans) {
+      const time = new Date(n.u * 1000).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+      const li = el("li", "", `${time} · ${n.l}`);
+      li.title = n.t;
+      ul.append(li);
+    }
+    sec.append(ul);
+  }
+  const body = el("div", "people-apps");
+  sec.append(body);
+  if (!p.primary) return sec;
+  body.textContent = "…";
+  invoke("activity_day", { person: p.name, day: people.day }).then((d) => {
+    body.textContent = "";
+    if (!d.apps.length) {
+      body.append(el("p", "hint", t("people.noActivity")));
+      return;
+    }
+    const most = d.apps[0].secs || 1;
+    for (const a of d.apps) {
+      const row = el("div", "people-app");
+      const bar = el("span", "people-bar");
+      bar.style.width = `${Math.max(4, (100 * a.secs) / most)}%`;
+      row.append(el("b", "", a.app), bar, el("span", "people-time", hm(a.secs)));
+      const titles = el("ul", "people-titles");
+      for (const [title, secs] of a.titles.slice(0, 4)) titles.append(el("li", "", `${title} — ${hm(secs)}`));
+      row.append(titles);
+      body.append(row);
+    }
+  }).catch((err) => { body.textContent = String(err); });
+  return sec;
+}
+
+$("memPeopleBtn").onclick = () => (people.open ? closePeople() : openPeople());
+
 $("memZoomIn").onclick = () => {
   mem.cam.k = Math.min(2.8, mem.cam.k * 1.2);
   applyTransform();
@@ -1484,7 +1836,8 @@ window.addEventListener("resize", () => {
 });
 
 async function loadMemoryGraph(keepState = false) {
-  const g = await invoke("memory_graph");
+  paintMemWho();
+  const g = await invoke("memory_graph", { who: mem.who });
   mem.raw = g;
   mem.model = buildGraphModel(g);
   if (!keepState) {
@@ -1507,13 +1860,14 @@ listen("k:memoria", async () => {
 });
 
 // ── moral compass: her homeostasis, whether she may act and what she defends ──
-const moral = { data: null };
+const moral = { data: null, who: null };
 // The keys of the compass axes; name and meaning are in the dictionary (axis.<key>[.what]).
 const AXES = ["escepticismo", "urgencia", "afinidad", "tension"];
 
 // The chip in the header and the line over the composer follow every state she sends.
 function moralIndicators(m) {
-  moral.data = m;
+  // The chip and banner are the lead's; the panel shows whoever was picked.
+  if (!moral.who) moral.data = m;
   const chip = $("moralState");
   chip.textContent = m.suspendida ? t("moral.chip.suspended", { omega: m.omega.toFixed(2) }) : t("moral.chip.free");
   chip.classList.toggle("bad", m.suspendida);
@@ -1597,7 +1951,11 @@ function renderMoral() {
     return;
   }
   const u = m.umbrales;
-  box.replaceChildren();
+  box.replaceChildren(crewSwitch(moral.who || leadId(), async (id) => {
+    moral.who = id === leadId() ? null : id;
+    moral.data = (await invoke("state", { who: moral.who })).moral;
+    renderMoral();
+  }));
 
   // 1. Agency: may she act?
   const ag = el("div", `net-card moral-agency ${m.suspendida ? "bad" : ""}`);
@@ -1705,7 +2063,9 @@ function renderMoral() {
 }
 
 views.loaders.moral = async () => {
-  moralIndicators((await invoke("state")).moral);
+  const s = await invoke("state", { who: moral.who });
+  if (moral.who) moral.data = s.moral;
+  else moralIndicators(s.moral);
   renderMoral();
 };
 $("moralState").onclick = () => showView("moral");
@@ -1753,7 +2113,16 @@ function renderNet() {
   if (!d.equipos.length) peers.append(el("div", "hint", t("net.peers.none")));
   for (const p of d.equipos) {
     const row = el("div", "net-row");
-    row.append(el("b", "grow", p.name), el("span", "hint", p.addr));
+    const crew = (p.crew && p.crew.length ? p.crew : ["kaltsit"]).map((id) => (member(id) ? member(id).name : id.charAt(0).toUpperCase() + id.slice(1)));
+    row.append(el("b", "grow", p.name), el("span", "tag", crew.join(" · ")), el("span", "hint", p.addr));
+    // Another companion leads there: a life of her own, they share only the bank.
+    if (p.mia === false) {
+      const other = el("span", "tag", t("net.peer.otherLife"));
+      other.title = t("net.peer.otherLife.title");
+      row.append(other);
+      peers.append(row);
+      continue;
+    }
     row.append(el("span", `tag${p.brain ? " brain" : ""}`, p.brain ? t("net.peer.brain") : p.think ? t("net.peer.canThink") : t("net.peer.terminal")));
     if (p.body) row.append(el("span", "tag body", t("net.peer.here")));
     row.append(el("span", "hint", p.idle < 5 ? t("net.peer.inUse") : t("net.peer.idle", { s: Math.round(p.idle) })));
@@ -1767,7 +2136,7 @@ function renderNet() {
     const row = el("div", "net-row");
     row.append(el("span", "grow", t(`net.side.${side}`)));
     const sel = el("select");
-    const names = ["", ...new Set([...d.equipos.map((p) => p.name), d.vecinos[side]].filter(Boolean))];
+    const names = ["", ...new Set([...d.equipos.filter((p) => p.mia !== false).map((p) => p.name), d.vecinos[side]].filter(Boolean))];
     for (const n of names) {
       const o = el("option", "", n || t("net.noneOption"));
       o.value = n;
@@ -1922,7 +2291,7 @@ $("askNo").onclick = async () => {
   try { await invoke("resolve_proposal", { accept: false }); } catch (e) { add("error", String(e)); }
 };
 // ── models panel ──
-const mods = { data: null, profile: null, progress: new Map() };
+const mods = { data: null, profile: null, progress: new Map(), voices: null, voiceWho: null };
 try { mods.profile = localStorage.getItem("kaltsit.perfil"); } catch {}
 const GB = (b) => `${(b / 1e9).toFixed(2)} GB`;
 const KINDS = ["cerebro", "voz", "oido", "motor"]; // title and hint: models.kind.<kind>[.hint]
@@ -1930,9 +2299,10 @@ const KINDS = ["cerebro", "voz", "oido", "motor"]; // title and hint: models.kin
 const catText = (what, id, fallback) => tOr(`cat.${what}.${id}`, fallback);
 
 async function loadModels() {
-  const [m, e] = await Promise.all([invoke("models_state", { profile: mods.profile }), invoke("engine_state").catch(() => null)]);
+  const [m, e, v] = await Promise.all([invoke("models_state", { profile: mods.profile }), invoke("engine_state").catch(() => null), invoke("voices").catch(() => null)]);
   mods.data = m;
   mods.engine = e;
+  mods.voices = v;
   renderModels();
 }
 
@@ -2035,13 +2405,20 @@ function engineCard(g) {
   return card;
 }
 
+// Whose voice the card shows (null: the lead's); `mods.voices`: everyone's, from `voices`.
+const voiceWho = () => mods.voiceWho || leadId();
+const voiceOf = () => ((mods.voices || []).find((x) => x.id === voiceWho()) || {}).voz || mods.data.voz;
+// A voice cloned from another companion is not for her.
+const othersClone = (id) => state.crew.some((c) => c.id !== voiceWho() && id.includes(c.id));
+
 function voiceControls(v) {
+  const who = mods.voiceWho;
   const box = el("div", "net-row");
   const on = el("label", "toggle");
   const cb = el("input");
   cb.type = "checkbox";
   cb.checked = v.activa;
-  cb.onchange = async () => { try { mods.data.voz = await invoke("set_voice", { active: cb.checked }); applyState(await invoke("state")); renderModels(); } catch (e) { add("error", String(e)); } };
+  cb.onchange = async () => { try { await invoke("set_voice", { who, active: cb.checked }); applyState(await invoke("state")); await loadModels(); } catch (e) { add("error", String(e)); } };
   on.append(cb, t("voice.speak"));
   box.append(on);
   const speed = el("select");
@@ -2051,15 +2428,16 @@ function voiceControls(v) {
     o.selected = Math.abs(s - v.velocidad) < 0.01;
     speed.append(o);
   }
-  speed.onchange = async () => { try { mods.data.voz = await invoke("set_voice", { speed: Number(speed.value) }); } catch (e) { add("error", String(e)); } };
+  speed.onchange = async () => { try { await invoke("set_voice", { who, speed: Number(speed.value) }); await loadModels(); } catch (e) { add("error", String(e)); } };
   box.append(el("span", "grow"), speed);
   const test = el("button", "ghost", t("voice.test"));
   test.type = "button";
   test.disabled = !v.lista;
-  test.onclick = async () => { try { mods.data.voz = await invoke("voice_test"); } catch (e) { add("error", String(e)); } };
+  test.onclick = async () => { try { await invoke("voice_test", { who }); } catch (e) { add("error", String(e)); } };
   box.append(test);
   const wrap = el("div");
   const said = v.idioma === "en" ? t("voice.english") : "";
+  wrap.append(crewSwitch(voiceWho(), (id) => { mods.voiceWho = id === leadId() ? null : id; renderModels(); }));
   wrap.append(box, el("div", v.lista ? "hint" : "hint warn", v.lista ? t("voice.speaksWith", { name: v.nombre, said }) : v.falta || t("voice.none")));
   if (v.error) wrap.append(el("div", "hint warn", t("voice.lastError", { e: v.error })));
   return wrap;
@@ -2087,7 +2465,7 @@ function modelRow(it, d) {
   head.append(el("b", "grow", catText("name", it.id, it.nombre)), el("span", "tag", tOr(`level.${it.nivel}`, it.nivel)));
   if (it.tipo === "cerebro") head.append(el("span", `tag fit-${it.cabe.replace(" ", "")}`, `~${it.vram.toFixed(1)} GB · ${tOr(`fit.${it.cabe}`, it.cabe)}`));
   if (it.recomendado) head.append(el("span", "tag brain", t("model.recommended")));
-  if (it.en_uso) head.append(el("span", "tag body", t("model.inUse")));
+  if (it.tipo === "voz" ? voiceOf().id === it.id : it.en_uso) head.append(el("span", "tag body", t("model.inUse")));
   box.append(head);
   if (it.nota) box.append(el("div", "hint", catText("note", it.id, it.nota)));
   const row = el("div", "net-row");
@@ -2097,11 +2475,13 @@ function modelRow(it, d) {
   } else if (it.instalado) {
     row.append(el("span", "grow hint", t("model.downloaded")));
     if (it.tipo === "voz") {
-      const use = el("button", it.en_uso ? "ghost" : "", it.en_uso ? t("model.inUseBtn") : t("model.use"));
+      const inUse = voiceOf().id === it.id;
+      const use = el("button", inUse ? "ghost" : "", inUse ? t("model.inUseBtn") : t("model.use"));
       use.type = "button";
-      use.disabled = it.en_uso;
+      use.disabled = inUse || othersClone(it.id);
+      if (othersClone(it.id)) use.title = t("voice.othersClone");
       use.onclick = async () => {
-        try { await invoke("set_voice", { id: it.id }); await loadModels(); } catch (e) { add("error", String(e)); }
+        try { await invoke("set_voice", { who: mods.voiceWho, id: it.id }); await loadModels(); } catch (e) { add("error", String(e)); }
       };
       row.append(use);
     }
@@ -2126,11 +2506,82 @@ function modelRow(it, d) {
   return box;
 }
 
+// Each companion's body on the desktop: her Spine chibi or her pixel art. Changing it reloads
+// her window with the other one.
+function bodiesCard() {
+  const card = el("div", "net-card");
+  card.append(el("h4", "", t("body.title")), el("div", "hint", t("body.hint")));
+  invoke("bodies").then((list) => {
+    for (const b of list) {
+      const row = el("div", "net-row");
+      row.append(el("span", "grow", b.name));
+      const sel = el("select");
+      for (const k of ["spine", "pixel"]) {
+        const o = el("option", "", t(`body.${k}`));
+        o.value = k;
+        o.selected = b.cuerpo === k;
+        sel.append(o);
+      }
+      sel.onchange = async () => {
+        try { await invoke("set_body", { who: b.id, cuerpo: sel.value }); } catch (err) { add("error", String(err)); }
+      };
+      row.append(sel);
+      card.append(row);
+    }
+  }).catch(() => card.remove());
+  return card;
+}
+
+// Who lives on this computer: the same choice as the window at start. Another one starts the
+// app again with them (another companion can live on another computer, linked in «Red»).
+function teamCard() {
+  const card = el("div", "net-card");
+  card.append(el("h4", "", t("team.title")), el("div", "hint", t("team.hint")));
+  invoke("team").then((tm) => {
+    const boxes = [];
+    for (const c of tm.personajes) {
+      const row = el("label", "toggle");
+      const cb = el("input");
+      cb.type = "checkbox";
+      cb.value = c.id;
+      cb.checked = tm.aqui.includes(c.id);
+      boxes.push(cb);
+      const dot = el("span", "who-dot");
+      dot.style.setProperty("--c", c.color);
+      row.append(cb, dot, c.name);
+      card.append(row);
+    }
+    const remember = el("label", "toggle");
+    const rc = el("input");
+    rc.type = "checkbox";
+    rc.checked = tm.recordar;
+    remember.append(rc, t("sel.remember"));
+    const go = el("button", "", t("team.apply"));
+    go.type = "button";
+    const sync = () => {
+      const ids = boxes.filter((b) => b.checked).map((b) => b.value);
+      go.disabled = !ids.length || (ids.join() === tm.aqui.join() && rc.checked === tm.recordar);
+    };
+    for (const b of [...boxes, rc]) b.onchange = sync;
+    sync();
+    go.onclick = async () => {
+      go.disabled = true;
+      go.textContent = t("team.restarting");
+      try { await invoke("set_team", { ids: boxes.filter((b) => b.checked).map((b) => b.value), remember: rc.checked }); } catch (e) { add("error", String(e)); sync(); go.textContent = t("team.apply"); }
+    };
+    const r = el("div", "net-row");
+    r.append(remember, el("span", "grow"), go);
+    card.append(r);
+  }).catch(() => card.remove());
+  return card;
+}
+
 function renderModels() {
   const d = mods.data;
   if (!d) return;
   const body = $("modelsBody");
   body.textContent = "";
+  body.append(teamCard(), bodiesCard());
 
   const pc = el("div", "net-card");
   const e = d.equipo;
@@ -2180,7 +2631,7 @@ function renderModels() {
     if (!items.length) continue;
     const card = el("div", "net-card");
     card.append(el("h4", "", t(`models.kind.${tipo}`)), el("div", "hint", t(`models.kind.${tipo}.hint`)));
-    if (tipo === "voz" && d.voz) card.append(voiceControls(d.voz));
+    if (tipo === "voz" && d.voz) card.append(voiceControls(voiceOf()));
     for (const it of items) card.append(modelRow(it, d));
     body.append(card);
     if (tipo === "cerebro") body.append(ownModelsCard(d));

@@ -65,11 +65,13 @@
 </section>
 
 <section class="view hidden" data-view="memory" data-i18n-aria="tab.memory">
+  <div id="memWho" class="crew-switch-row"></div>
   <div class="view-head mem-head">
     <input type="search" id="memSearch" class="mem-search" data-i18n-placeholder="mem.search.placeholder" autocomplete="off" spellcheck="false">
     <span id="memSearchCount" class="mem-search-count hidden"></span>
     <button type="button" id="memCollapse" class="ghost" data-i18n="mem.core" data-i18n-title="mem.core.title"></button>
     <button type="button" id="memCenter" class="ghost" data-i18n="mem.center" data-i18n-title="mem.center.title"></button>
+    <button type="button" id="memPeopleBtn" class="ghost" data-i18n="people.button" data-i18n-title="people.button.title"></button>
     <button type="button" id="memViewer" class="ghost" data-i18n="mem.viewer" data-i18n-title="mem.viewer.title"></button>
   </div>
   <div class="mem-bar">
@@ -85,6 +87,8 @@
     </div>
     <div id="memEmpty" class="empty hidden"></div>
     <aside id="memDetail" class="mem-detail hidden" data-i18n-aria="mem.detail.aria"></aside>
+    <div id="memPeople" class="mem-people hidden"></div>
+    <div id="memCommon" class="mem-people hidden"></div>
   </div>
 </section>
 

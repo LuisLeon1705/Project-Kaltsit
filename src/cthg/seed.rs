@@ -112,22 +112,33 @@ pub fn build_base(lang: &str, user: &str) -> Result<Memory, String> {
     build_named(&with_user(base_seed(lang), user), name)
 }
 
+/// Builds the base memory of companion `c` in `lang` for the primary user `user`.
+pub fn build_character(c: &crate::character::Character, lang: &str, user: &str) -> Result<Memory, String> {
+    if c.id == crate::character::KALTSIT.id {
+        return build_base(lang, user);
+    }
+    build_named(&with_user(c.seed(lang), user), &format!("{}_{}.ron", c.id, if lang == "en" { "en" } else { "es" }))
+}
+
 /// What a sectored memory was born from (the memory meta `"semilla"`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Born {
     /// The owner's own seed, read from disk (`personal_seed`).
     Personal,
-    /// A compiled base seed, in this language.
+    /// A compiled base seed, in this language: Kal'tsit's (the meta keeps its first name).
     Base(&'static str),
+    /// Another companion's compiled seed: her id and the language.
+    Character(&'static str, &'static str),
 }
 
 impl Born {
     /// The value written in the meta `"semilla"`.
-    pub fn meta(self) -> &'static str {
+    pub fn meta(self) -> String {
         match self {
-            Born::Personal => "personal",
-            Born::Base("en") => "base_en",
-            Born::Base(_) => "base_es",
+            Born::Personal => "personal".into(),
+            Born::Base("en") => "base_en".into(),
+            Born::Base(_) => "base_es".into(),
+            Born::Character(id, lang) => format!("{id}_{lang}"),
         }
     }
 
@@ -136,12 +147,39 @@ impl Born {
             "personal" => Some(Born::Personal),
             "base_en" => Some(Born::Base("en")),
             "base_es" => Some(Born::Base("es")),
-            _ => None,
+            _ => {
+                let (id, lang) = s.rsplit_once('_')?;
+                let c = crate::character::get(id)?;
+                let lang = match lang {
+                    "en" => "en",
+                    "es" => "es",
+                    _ => return None,
+                };
+                (c.id != crate::character::KALTSIT.id).then_some(Born::Character(c.id, lang))
+            }
         }
     }
 
     pub fn of_language(lang: &str) -> Born {
         Born::Base(if lang == "en" { "en" } else { "es" })
+    }
+
+    /// The seed a new memory of companion `c` is born from, in `lang`.
+    pub fn of(c: &crate::character::Character, lang: &str) -> Born {
+        let lang = if lang == "en" { "en" } else { "es" };
+        if c.id == crate::character::KALTSIT.id {
+            Born::Base(lang)
+        } else {
+            Born::Character(c.id, lang)
+        }
+    }
+
+    /// Whose memory it is: Kal'tsit's for her own seeds (base or personal).
+    pub fn character(self) -> &'static crate::character::Character {
+        match self {
+            Born::Character(id, _) => crate::character::get(id).unwrap_or(&crate::character::KALTSIT),
+            _ => &crate::character::KALTSIT,
+        }
     }
 }
 
@@ -1017,9 +1055,14 @@ mod tests {
 
     #[test]
     fn born_kinds_round_trip_through_the_meta() {
-        for b in [Born::Personal, Born::Base("en"), Born::Base("es")] {
-            assert_eq!(Born::parse(b.meta()), Some(b));
+        for b in [Born::Personal, Born::Base("en"), Born::Base("es"), Born::Character("lappland", "es"), Born::Character("lappland", "en")] {
+            assert_eq!(Born::parse(&b.meta()), Some(b));
         }
+        assert_eq!(Born::parse("kaltsit_es"), None, "Kal'tsit's seed keeps its first name");
+        assert_eq!(Born::parse("nadie_es"), None);
+        assert_eq!(Born::of(&crate::character::LAPPLAND, "es").meta(), "lappland_es");
+        assert_eq!(Born::of(&crate::character::KALTSIT, "en").meta(), "base_en");
+        assert_eq!(Born::Character("lappland", "es").character().name, "Lappland");
         assert_eq!(Born::parse("otra"), None);
         assert_eq!(Born::of_language("en").meta(), "base_en");
         assert_eq!(Born::of_language("xx").meta(), "base_es");

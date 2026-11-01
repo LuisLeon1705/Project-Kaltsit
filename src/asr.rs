@@ -621,13 +621,13 @@ mod tests {
     #[cfg(windows)]
     fn real_ear_hears_her_own_voice_when_downloaded() {
         let m = Manifest::load();
-        let lines = [("es", "voz-daniela", "Mañana por la mañana tengo que revisar el informe de ventas y llamar a mi hermana."), ("en", "voz-kaltsit-en", "Tomorrow morning I have to review the sales report and call my sister.")];
+        let lines = [("es", "voz-daniela", "Mañana por la mañana tengo que revisar el informe de ventas y llamar a mi hermana."), ("en", "voz-kaltsit-en", "Tomorrow morning I have to review the sales report and call my sister."), ("en", "voz-lappland-en", "If you want a fight, you will get one. Just do not cry when it is over.")];
         for (lang, voice, line) in lines {
             let Ok(s) = setup(&m, lang) else {
                 eprintln!("oído no descargado, se salta");
                 return;
             };
-            let wav = std::env::temp_dir().join(format!("kaltsit-ear-{lang}-{}.wav", std::process::id()));
+            let wav = std::env::temp_dir().join(format!("kaltsit-ear-{voice}-{}.wav", std::process::id()));
             if spoken_wav(&m, voice, line, &wav).is_none() {
                 eprintln!("{voice}: no descargada, se salta");
                 continue;

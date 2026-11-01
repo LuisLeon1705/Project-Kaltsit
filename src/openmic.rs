@@ -361,7 +361,7 @@ mod tests {
             ("técnico", "vale entonces el servidor arranca primero llama-server luego espera a que el endpoint de health responda doscientos y después la app manda la primera petición, pero si el modelo tarda en cargar la ventana de contexto se queda con el valor por defecto y además el slot de análisis", &calm),
         ];
         for (kind, text, sound) in cases {
-            let r = crate::life::read_monologue_with(&llm, crate::lang::Lang::Es, text, sound);
+            let r = crate::life::read_monologue_with(&llm, crate::lang::Lang::Es, "Kal'tsit", text, sound);
             eprintln!("{kind}: {r:?}");
         }
     }

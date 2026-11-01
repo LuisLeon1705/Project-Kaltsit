@@ -157,7 +157,11 @@ pub fn personal_core_emotion(l: Lang) -> &'static str {
 
 /// The Minecraft section of the system prompt. `templates` is the list of buildable templates
 /// (identifiers the mod knows), `saved` the structures the Doctor saved.
-pub fn minecraft_section(l: Lang, user: &str, templates: &str, saved: &[String]) -> String {
+pub fn minecraft_section(l: Lang, name: &str, user: &str, templates: &str, saved: &[String]) -> String {
+    named(minecraft_section_of(l, user, templates, saved), name)
+}
+
+fn minecraft_section_of(l: Lang, user: &str, templates: &str, saved: &[String]) -> String {
     let mut base = String::new();
     match l {
         Lang::Es => {
@@ -220,6 +224,11 @@ pub fn minecraft_section(l: Lang, user: &str, templates: &str, saved: &[String])
         }
     }
     base
+}
+
+/// A text written for Kal'tsit, for companion `name` (the same text for her).
+fn named(text: String, name: &str) -> String {
+    if name == "Kal'tsit" { text } else { text.replace("Kal'tsit", name) }
 }
 
 // ── the conversation window and the bracketed context ──
@@ -295,10 +304,14 @@ pub fn sounded_unusual(l: Lang, s: &serde_json::Value) -> Option<String> {
 
 /// The quick read of a monologue piece: the model puts numbers on how charged it is and says
 /// what Kal'tsit should do while the person is still talking. Answered as JSON.
-pub fn monologue_reading_prompt(l: Lang) -> &'static str {
+pub fn monologue_reading_prompt(l: Lang, name: &str) -> String {
+    named(monologue_reading_prompt_of(l).to_string(), name)
+}
+
+fn monologue_reading_prompt_of(l: Lang) -> &'static str {
     match l {
-        Lang::Es => "Alguien le está hablando en voz alta a Kal'tsit (un programa con el carácter de Kal'tsit de Arknights: fría, precisa, con criterio propio) y todavía no ha terminado: esto es lo que lleva dicho sin hacer pausa, y cómo suena su voz. Pon números a su estado y decide qué debería hacer Kal'tsit mientras sigue hablando:\n- \"esperar\": dejarle seguir sin decir nada (alguien que se desahoga y necesita terminar, o algo que va claramente a algún sitio);\n- \"breve\": decir una sola frase corta y dejarle seguir (para que sepa que le escucha, para frenar algo que va contra ella, o para encauzar);\n- \"interrumpir\": cortar y responder ya (una explicación larga sin carga emocional que se puede resumir, una pregunta que ya está clara, algo con lo que discrepa).\nNo hace falta empatía si no toca: si le grita o la insulta, que responda como ella. Solo JSON.",
-        Lang::En => "Someone is speaking out loud to Kal'tsit (a program with the character of Kal'tsit from Arknights: cold, precise, with a judgement of her own) and has not finished yet: this is what they have said without pausing, and how their voice sounds. Put numbers on their state and decide what Kal'tsit should do while they keep talking:\n- \"esperar\" (wait): let them go on without a word (someone venting who needs to finish, or something clearly going somewhere);\n- \"breve\" (brief): say one short sentence and let them go on (so they know she is listening, to stop something aimed at her, or to steer);\n- \"interrumpir\" (interrupt): cut in and answer now (a long explanation with no emotional weight that can be summed up, a question already clear, something she disagrees with).\nNo empathy is needed where it does not fit: if they shout at or insult her, she answers as herself. JSON only.",
+        Lang::Es => "Alguien le está hablando en voz alta a Kal'tsit (un programa con el carácter de Kal'tsit de Arknights y criterio propio) y todavía no ha terminado: esto es lo que lleva dicho sin hacer pausa, y cómo suena su voz. Pon números a su estado y decide qué debería hacer Kal'tsit mientras sigue hablando:\n- \"esperar\": dejarle seguir sin decir nada (alguien que se desahoga y necesita terminar, o algo que va claramente a algún sitio);\n- \"breve\": decir una sola frase corta y dejarle seguir (para que sepa que le escucha, para frenar algo que va contra ella, o para encauzar);\n- \"interrumpir\": cortar y responder ya (una explicación larga sin carga emocional que se puede resumir, una pregunta que ya está clara, algo con lo que discrepa).\nNo hace falta empatía si no toca: si le grita o la insulta, que responda como ella. Solo JSON.",
+        Lang::En => "Someone is speaking out loud to Kal'tsit (a program with the character of Kal'tsit from Arknights and a judgement of her own) and has not finished yet: this is what they have said without pausing, and how their voice sounds. Put numbers on their state and decide what Kal'tsit should do while they keep talking:\n- \"esperar\" (wait): let them go on without a word (someone venting who needs to finish, or something clearly going somewhere);\n- \"breve\" (brief): say one short sentence and let them go on (so they know she is listening, to stop something aimed at her, or to steer);\n- \"interrumpir\" (interrupt): cut in and answer now (a long explanation with no emotional weight that can be summed up, a question already clear, something she disagrees with).\nNo empathy is needed where it does not fit: if they shout at or insult her, she answers as herself. JSON only.",
     }
 }
 
@@ -462,7 +475,11 @@ pub fn extraction_sector_line(l: Lang, keys: &str) -> String {
     }
 }
 
-pub fn extraction_system(l: Lang, user: &str, sector_line: &str) -> String {
+pub fn extraction_system(l: Lang, name: &str, user: &str, sector_line: &str) -> String {
+    named(extraction_system_of(l, user, sector_line), name)
+}
+
+fn extraction_system_of(l: Lang, user: &str, sector_line: &str) -> String {
     match l {
         Lang::Es => format!(
             "Eres el analista de la memoria de Kal'tsit, un programa con voluntad propia que vive en el ordenador de {user}. Lees un mensaje de {user} y devuelves un JSON compacto, en una sola línea.\n\
@@ -507,7 +524,11 @@ pub fn none_listed(l: Lang) -> &'static str {
 
 // ── the reflection ──
 
-pub fn reflection_system(l: Lang, user: &str) -> String {
+pub fn reflection_system(l: Lang, name: &str, user: &str) -> String {
+    named(reflection_system_of(l, user), name)
+}
+
+fn reflection_system_of(l: Lang, user: &str) -> String {
     match l {
         Lang::Es => format!(
             "Eres la parte reflexiva de Kal'tsit, un programa con voluntad propia que vive en el ordenador de {user}. Repasas lo que vivió últimamente y desarrollas su propio criterio: qué piensa ella de lo vivido, qué le interesa o le disgusta, qué quiere hacer, en qué ha cambiado; y lo que va entendiendo de {user} (sus hábitos, en qué trabaja, qué le preocupa). Sus conclusiones son suyas, no las de una asistente.\n\
@@ -569,6 +590,70 @@ pub fn seen_line(l: Lang, seen: &str) -> String {
 }
 
 /// The user text recorded for a comment of hers after looking at the screen.
+/// A long session worked on, as a memory: label and text.
+pub fn activity_episode(l: Lang, person: &str, app: &str, title: &str, time: &str) -> (String, String) {
+    match l {
+        Lang::Es => (format!("Trabajó en {app}"), format!("{person} estuvo {time} con «{title}» en {app}.")),
+        Lang::En => (format!("Worked in {app}"), format!("{person} spent {time} on \"{title}\" in {app}.")),
+    }
+}
+
+/// A day's summary, as a memory: label and text. `apps`: "Visual Studio Code 3 h 10 min
+/// (hearing.rs, openmic.rs)", most first.
+pub fn day_summary(l: Lang, person: &str, date: &str, total: &str, apps: &[String]) -> (String, String) {
+    match l {
+        Lang::Es => (format!("Resumen del {date}"), format!("El {date}, {person} trabajó {total} en el ordenador: {}.", apps.join("; "))),
+        Lang::En => (format!("Summary of {date}"), format!("On {date}, {person} worked {total} at the computer: {}.", apps.join("; "))),
+    }
+}
+
+/// A note another companion left her, read before she answers.
+pub fn note_from(l: Lang, from: &str, text: &str) -> String {
+    match l {
+        Lang::Es => format!("{from} te dejó una nota: «{text}»"),
+        Lang::En => format!("{from} left you a note: \"{text}\""),
+    }
+}
+
+/// After reflecting: whether to leave another companion a note. Answered as JSON {nota}.
+pub fn note_prompt(l: Lang, me: &str, other: &str, user: &str) -> String {
+    match l {
+        Lang::Es => format!("Eres {me}. En el ordenador de {user} vive también {other}, otra compañera con su propia memoria: no sabe lo que tú has vivido. Si de lo que viviste últimamente hay algo que {other} debería saber (sobre {user}, un plan, algo que pasó), escríbele una nota breve, en tu voz, de una o dos frases. Si no hay nada que merezca la pena, deja la nota vacía. Solo JSON."),
+        Lang::En => format!("You are {me}. {other} also lives on {user}'s computer, another companion with a memory of her own: she does not know what you lived. If something of what you lived lately is worth {other} knowing (about {user}, a plan, something that happened), write her a short note, in your voice, of one or two sentences. If nothing is worth it, leave the note empty. JSON only."),
+    }
+}
+
+/// In a group chat, what a companion who answered before said, in the next one's window.
+pub fn group_said(l: Lang, name: &str, said: &str) -> String {
+    match l {
+        Lang::Es => format!("{name} acaba de responder: «{said}»"),
+        Lang::En => format!("{name} has just answered: \"{said}\""),
+    }
+}
+
+/// In a group chat, to a companion another one named in her answer.
+pub fn group_reply_hint(l: Lang, name: &str, said: &str) -> String {
+    match l {
+        Lang::Es => format!("{name} te ha nombrado al responder: «{said}». Si tienes algo que decirle, díselo en una o dos frases, como tú lo dirías; si no, una frase basta"),
+        Lang::En => format!("{name} named you in her answer: \"{said}\". If you have something to say to her, say it in one or two sentences, the way you would; otherwise one sentence will do"),
+    }
+}
+
+/// The narration when someone comes back after an absence: where they left off.
+pub fn welcome_back_hint(l: Lang, person: &str, away: &str, items: &[String]) -> String {
+    match l {
+        Lang::Es => format!("{person} vuelve al ordenador tras {away} fuera. Antes de irse estaba con: {}. Díselo en una o dos frases, como tú lo dirías, por si quiere retomarlo; no hace falta saludar con ceremonia", items.join("; ")),
+        Lang::En => format!("{person} is back at the computer after {away} away. Before leaving they were on: {}. Tell them in one or two sentences, the way you would, in case they want to pick it up; no need for a ceremonious greeting", items.join("; ")),
+    }
+}
+
+pub fn back_placeholder(l: Lang) -> &'static str {
+    match l {
+        Lang::Es => "(vuelve al ordenador)",
+        Lang::En => "(back at the computer)",
+    }
+}
+
 pub fn look_placeholder(l: Lang) -> &'static str {
     match l {
         Lang::Es => "(mira la pantalla)",
@@ -776,9 +861,9 @@ ui_texts! {
     StReflecting => "reflexionando…", "reflecting…";
     StWaking => "despertando el modelo…", "waking the model…";
     StReading => "leyendo…", "reading…";
-    StReplying => "Kal'tsit responde…", "Kal'tsit is replying…";
-    StListening => "Kal'tsit escucha…", "Kal'tsit is listening…";
-    StWatching => "Kal'tsit observa…", "Kal'tsit is watching…";
+    StReplying => "{0} responde…", "{0} is replying…";
+    StListening => "{0} escucha…", "{0} is listening…";
+    StWatching => "{0} observa…", "{0} is watching…";
     StLooking => "mirando la pantalla…", "looking at the screen…";
     StResting => "en reposo (VRAM liberada)", "resting (VRAM freed)";
     StSwitching => "cambiando a {0}…", "switching to {0}…";
@@ -947,13 +1032,21 @@ mod tests {
     }
 
     #[test]
+    fn the_statuses_name_the_companion() {
+        assert_eq!(Ui::StReplying.fill(Lang::Es, &["Kal'tsit"]), "Kal'tsit responde…");
+        assert_eq!(Ui::StWatching.fill(Lang::Es, &["Kal'tsit"]), "Kal'tsit observa…");
+        assert_eq!(Ui::StListening.fill(Lang::En, &["Lappland"]), "Lappland is listening…");
+        assert!(extraction_system(Lang::Es, "Lappland", "Ana", "").contains("analista de la memoria de Lappland"));
+        assert!(!reflection_system(Lang::En, "Lappland", "Ana").contains("Kal'tsit"));
+        assert_eq!(extraction_system(Lang::Es, "Kal'tsit", "Ana", "x"), extraction_system_of(Lang::Es, "Ana", "x"), "her own text, unchanged");
+    }
+
+    #[test]
     fn the_spanish_ui_texts_are_the_original_literals() {
         let plain = [
             (Ui::StReflecting, "reflexionando…"),
             (Ui::StWaking, "despertando el modelo…"),
             (Ui::StReading, "leyendo…"),
-            (Ui::StReplying, "Kal'tsit responde…"),
-            (Ui::StWatching, "Kal'tsit observa…"),
             (Ui::StLooking, "mirando la pantalla…"),
             (Ui::StResting, "en reposo (VRAM liberada)"),
             (Ui::VerbConcludes, "concluye"),

@@ -1102,6 +1102,82 @@ mod tests {
         Some(resample(&x, r, RATE))
     }
 
+    /// Each cloned voice sounds like her own clip, not like the other's: the voiceprint of what
+    /// each says is nearer her reference than the other companion's.
+    #[test]
+    fn each_clone_sounds_like_her_own_clip() {
+        let Some((m, fine)) = ready() else { return };
+        let line = "If you want a fight, you will get one. Just do not cry when it is over, because I will not stop.";
+        let clip = |id: &str| -> Option<Vec<f32>> {
+            let s = crate::voice::setup(&m, id, 1.0).ok()?;
+            let (x, r) = crate::voice::read_wav(s.reference.as_ref()?).ok()?;
+            tests_embed(&fine, &resample(&x, r, RATE))
+        };
+        let said = |id: &str| spoken16(&m, id, line).and_then(|x| tests_embed(&fine, &x));
+        let (Some(rk), Some(rl), Some(sk), Some(sl)) = (clip("voz-kaltsit-en"), clip("voz-lappland-en"), said("voz-kaltsit-en"), said("voz-lappland-en")) else {
+            return eprintln!("voces clonadas no descargadas, se salta");
+        };
+        eprintln!("clips entre sí {:.2}", similarity(&rk, &rl));
+        eprintln!("Kal'tsit dice → su clip {:.2} · el de Lappland {:.2}", similarity(&sk, &rk), similarity(&sk, &rl));
+        eprintln!("Lappland dice → su clip {:.2} · el de Kal'tsit {:.2}", similarity(&sl, &rl), similarity(&sl, &rk));
+        eprintln!("lo que dicen entre sí {:.2}", similarity(&sk, &sl));
+        assert!(similarity(&sk, &rk) > similarity(&sk, &rl), "Kal'tsit sounds like Kal'tsit");
+        assert!(similarity(&sl, &rl) > similarity(&sl, &rk), "Lappland sounds like Lappland");
+    }
+
+    /// Which clip clones a voice best (KALTSIT_CANDIDATES: a folder of WAVs of one speaker): each
+    /// one as the reference, what it says, against her average voice over all of them and
+    /// Kal'tsit's, and how much of it Whisper gets right (a glitchy or tearful clone loses words).
+    /// KALTSIT_OUT keeps what each says, to listen to; KALTSIT_EXTRA overrides the voice settings.
+    #[test]
+    #[ignore]
+    fn rank_reference_clips() {
+        let Some((m, fine)) = ready() else { return };
+        let Ok(dir) = std::env::var("KALTSIT_CANDIDATES") else { return };
+        let ear = crate::asr::setup(&m, "en").unwrap();
+        let lines = [
+            "Good morning, Doctor. I read the report you left on my desk, and I have a few questions about the budget.",
+            "If you want a fight, you will get one. Just do not cry when it is over, because I will not stop.",
+        ];
+        let mut base = crate::voice::setup(&m, "voz-lappland-en", 1.0).unwrap();
+        if let Ok(x) = std::env::var("KALTSIT_EXTRA") {
+            base.extra = x;
+        }
+        let kal = crate::voice::setup(&m, "voz-kaltsit-en", 1.0).unwrap();
+        let print_of = |p: &std::path::Path| crate::voice::read_wav(p).ok().and_then(|(x, r)| tests_embed(&fine, &resample(&x, r, RATE)));
+        let rk = print_of(kal.reference.as_ref().unwrap()).unwrap();
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "wav")).collect();
+        files.sort();
+        let prints: Vec<Vec<f32>> = files.iter().filter_map(|p| print_of(p)).collect();
+        let mut mean = vec![0.0f32; prints[0].len()];
+        for v in &prints {
+            for (a, b) in mean.iter_mut().zip(v) {
+                *a += b / prints.len() as f32;
+            }
+        }
+        let words = |t: &str| t.to_lowercase().chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect::<String>().split_whitespace().map(String::from).collect::<Vec<_>>();
+        for f in &files {
+            let s = crate::voice::Setup { reference: Some(f.clone()), ..base.clone() };
+            let (mut her, mut kal, mut ok, mut total) = (0.0, 0.0, 0usize, 0usize);
+            for (i, line) in lines.iter().enumerate() {
+                let Ok((x, r)) = crate::voice::synth_for_test(&s, line) else { continue };
+                if let Ok(out) = std::env::var("KALTSIT_OUT") {
+                    let _ = std::fs::write(std::path::Path::new(&out).join(format!("{}-{i}.wav", f.file_stem().unwrap().to_string_lossy())), crate::download::wav(&x, r));
+                }
+                let x16 = resample(&x, r, RATE);
+                if let Some(p) = tests_embed(&fine, &x16) {
+                    her += similarity(&p, &mean) / lines.len() as f32;
+                    kal += similarity(&p, &rk) / lines.len() as f32;
+                }
+                let heard = words(&crate::asr::transcribe(&ear, &x16, RATE).unwrap_or_default());
+                let said = words(line);
+                ok += said.iter().filter(|w| heard.contains(w)).count();
+                total += said.len();
+            }
+            eprintln!("{} · ella {her:.2} · Kal'tsit {kal:.2} · Whisper {:.0} %", f.file_name().unwrap().to_string_lossy(), 100.0 * ok as f32 / total.max(1) as f32);
+        }
+    }
+
     fn ready() -> Option<(Manifest, Setup)> {
         let m = Manifest::load();
         let s = setup(&m);

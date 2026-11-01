@@ -147,6 +147,17 @@ pub struct Status {
     pub body: bool,
     pub left: String,
     pub right: String,
+    /// The companions running on that computer, the lead first (none: an older version, where
+    /// only Kal'tsit lived).
+    #[serde(default)]
+    pub crew: Vec<String>,
+}
+
+impl Status {
+    /// The companion whose link this computer carries: its lead.
+    pub fn lead(&self) -> &str {
+        self.crew.first().map(String::as_str).unwrap_or("kaltsit")
+    }
 }
 
 /// Inside a beacon sealed with a session.
@@ -229,6 +240,8 @@ pub struct Linking {
 }
 
 pub struct Net {
+    /// The lead companion of this computer (see `set_crew`).
+    lead: Mutex<String>,
     pub id: String,
     pub name: String,
     pub port: u16,
@@ -332,6 +345,7 @@ impl Net {
         let secret = StaticSecret::from(bytes);
         let public = PublicKey::from(&secret).to_bytes();
         let net = Arc::new(Net {
+            lead: Mutex::new("kaltsit".into()),
             id,
             name,
             port,
@@ -412,12 +426,25 @@ impl Net {
         lock(&self.status)
     }
 
-    /// Linked computers heard from recently, by id.
-    pub fn alive(&self) -> Vec<Peer> {
+    /// The companions running here, the lead first: her brain, body and memory go only to
+    /// computers with the same lead (Kal'tsit here and Lappland there are two separate lives).
+    pub fn set_crew(&self, ids: Vec<String>) {
+        *lock(&self.lead) = ids.first().cloned().unwrap_or_else(|| "kaltsit".into());
+        self.status().crew = ids;
+    }
+
+    /// Every linked computer heard from recently, whoever lives on it, by name.
+    pub fn everyone(&self) -> Vec<Peer> {
         let now = now();
         let mut v: Vec<Peer> = lock(&self.peers).values().filter(|p| now - p.seen < ALIVE_S).cloned().collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         v
+    }
+
+    /// Linked computers heard from recently that carry the same companion as this one.
+    pub fn alive(&self) -> Vec<Peer> {
+        let lead = lock(&self.lead).clone();
+        self.everyone().into_iter().filter(|p| p.status.lead() == lead).collect()
     }
 
     pub fn peer(&self, id: &str) -> Option<Peer> {

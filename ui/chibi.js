@@ -1,17 +1,19 @@
-// Kal'tsit's chibi: the RIIC building model (Spine 3.8) drawn on a transparent canvas.
-// Downloaded on demand from isHarryh/Ark-Models into modelos/spine/003_kalts/.
+// A companion's chibi: her RIIC building model (Spine 3.8) drawn on a transparent canvas.
+// Downloaded on demand from isHarryh/Ark-Models into modelos/spine/<model>/ (Kal'tsit's
+// 003_kalts, Lappland's 140_whitew).
 "use strict";
 
-const SPINE_DIR = "spine/003_kalts/";
-const SKEL = SPINE_DIR + "build_char_003_kalts.skel";
-const ATLAS = SPINE_DIR + "build_char_003_kalts.atlas";
-const PNG = SPINE_DIR + "build_char_003_kalts.png";
-// The building model is about 260 units tall at scale 1.
+// The building models are about 260 units tall at scale 1.
 const MODEL_SCALE = 0.62;
 
 class Chibi {
-  constructor(canvas) {
+  constructor(canvas, model = "003_kalts", who = null) {
     this.canvas = canvas;
+    this.who = who;
+    const SPINE_DIR = (this.dir = `spine/${model}/`);
+    const SKEL = (this.skelPath = `${SPINE_DIR}build_char_${model}.skel`);
+    const ATLAS = (this.atlasPath = `${SPINE_DIR}build_char_${model}.atlas`);
+    const PNG = `${SPINE_DIR}build_char_${model}.png`;
     const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: true });
     this.ctx = new spine.webgl.ManagedWebGLRenderingContext(gl);
     this.assets = new spine.webgl.AssetManager(this.ctx);
@@ -37,7 +39,7 @@ class Chibi {
           wait();
           return;
         }
-        invoke("chibi_model")
+        invoke("chibi_model", { who: this.who })
           .then((m) => {
             this._rawAtlas = m.atlas;
             const binStr = atob(m.skel);
@@ -56,9 +58,9 @@ class Chibi {
 
   _build() {
     const atlas = this._rawAtlas
-      ? new spine.TextureAtlas(this._rawAtlas, (path) => this.assets.get(SPINE_DIR + path))
-      : this.assets.get(ATLAS);
-    const skel = this._rawSkel || this.assets.get(SKEL);
+      ? new spine.TextureAtlas(this._rawAtlas, (path) => this.assets.get(this.dir + path))
+      : this.assets.get(this.atlasPath);
+    const skel = this._rawSkel || this.assets.get(this.skelPath);
     const bin = new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas));
     bin.scale = MODEL_SCALE;
     this.data = bin.readSkeletonData(skel);

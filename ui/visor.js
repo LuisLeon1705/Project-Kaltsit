@@ -68,20 +68,28 @@ function useLang(code) {
   langReady = true;
   setLang(code);
   applyI18n(document);
-  document.title = t("visor.title");
+  document.title = t("visor.title", { name: st.name });
   paintStamp();
   if (st.g) {
     build();
     if (st.selected != null) showDetail(st.selected);
   }
 }
-invoke("state").then((s) => useLang(s.idioma)).catch(() => useLang("es"));
+// Whose memory this window shows (`visor.html?who=lappland`; none: the lead's).
+const WHO = new URLSearchParams(location.search).get("who");
+st.name = "Kal'tsit";
+invoke("state", { who: WHO }).then((s) => {
+  const me = (s.crew || []).find((c) => c.id === WHO) || (s.crew || [])[0];
+  if (me) st.name = me.name;
+  useLang(s.idioma);
+}).catch(() => useLang("es"));
 listen("k:state", (e) => { if (e.payload && e.payload.idioma) useLang(e.payload.idioma); });
 
 // ── data ──
 
 async function load() {
-  const g = await invoke("memory_graph");
+  // Whose: the window was opened for one companion (`visor.html?who=lappland`).
+  const g = await invoke("memory_graph", { who: WHO });
   st.g = g;
   st.byId = new Map(g.nodes.map((n) => [n.id, n]));
   st.adj = new Map();

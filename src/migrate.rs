@@ -200,7 +200,7 @@ pub fn migrate(data: &Path, now: f64, stamp: &str, verify: Verify, log: &mut Vec
 fn apply(data: &Path, old: &Memory, now: f64, guided: Memory, backup: &Path, verify: Verify, log: &mut Vec<String>) -> Result<PathBuf, String> {
     let (mut new, rep) = import::curated(old, now, guided)?;
     // It was born from the owner's seed, and he has already been through the first launch.
-    new.set_meta("semilla", seed::Born::Personal.meta());
+    new.set_meta("semilla", &seed::Born::Personal.meta());
     new.set_meta("primer_arranque", "hecho");
     // The persona, scene and greeting of the new seed travel in `yo`'s meta, as `Mind::save` writes them.
     if let Some(p) = new.periods.first().cloned() {

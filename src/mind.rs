@@ -59,7 +59,7 @@ const MIN_FACT_WORDS: usize = 3;
 /// How alike a fact and the memory the analyst says it restates must be («apoya: N»).
 const SUPPORT_MIN: f32 = 0.3;
 /// Names and reporting verbs: they frame a fact ("Ana afirma que…"), they never anchor it.
-const REPORTING: &str = "Kal'tsit kaltsit kal afirma afirmo pregunta pregunto dice dijo cree piensa quiere desea comenta menciona opina considera sabe explica cuenta \
+const REPORTING: &str = "Kal'tsit kaltsit kal Lappland lappland lapp afirma afirmo pregunta pregunto dice dijo cree piensa quiere desea comenta menciona opina considera sabe explica cuenta \
 says said asks asked thinks thought believes wants wishes comments mentions considers knows explains tells claims states";
 
 pub use clock::unix_now;
@@ -222,7 +222,8 @@ pub fn clean_reply(s: &str) -> String {
             }
         }
     }
-    let mut t = t.strip_prefix("Kal'tsit:").unwrap_or(t).trim().trim_start_matches('>').trim_start();
+    // …or names herself first ("Kal'tsit: …", "Lappland: …").
+    let mut t = crate::character::ALL.iter().find_map(|c| t.strip_prefix(c.name).and_then(|x| x.strip_prefix(':'))).unwrap_or(t).trim().trim_start_matches('>').trim_start();
     // …or put the whole reply in quotes.
     for (open, close) in [('"', '"'), ('«', '»'), ('“', '”')] {
         if let Some(inner) = t.strip_prefix(open).and_then(|x| x.strip_suffix(close)) {
@@ -546,20 +547,31 @@ impl Mind {
     /// is one, is folded in and sorted into sectors by the curated import). A memory that already
     /// exists is opened as it is: with sectors it is never touched by the old seed.
     pub fn open(data: &Path, model: &str) -> Result<Mind, String> {
-        Self::open_as(data, model, true)
+        Self::open_as(data, model, true, &crate::character::KALTSIT)
+    }
+
+    /// `open` for companion `c`: a new install is born from her seed. An existing memory is
+    /// whoever it was born as (`character`).
+    pub fn open_for(data: &Path, model: &str, c: &'static crate::character::Character) -> Result<Mind, String> {
+        Self::open_as(data, model, true, c)
+    }
+
+    /// Whose memory this is, from the seed it was born from.
+    pub fn character(&self) -> &'static crate::character::Character {
+        Self::born_from(&self.mem).map(|b| b.character()).unwrap_or(&crate::character::KALTSIT)
     }
 
     /// `open`, choosing how a NEW install is born: with the sectored seed (`true`, what the app
     /// does) or with the first, sector-less seed (`false`; only the tests written against that
     /// seed ask for it).
-    fn open_as(data: &Path, model: &str, sectored: bool) -> Result<Mind, String> {
+    fn open_as(data: &Path, model: &str, sectored: bool, character: &'static crate::character::Character) -> Result<Mind, String> {
         std::fs::create_dir_all(data).map_err(|e| e.to_string())?;
         let here = crate::origin::here(model);
         let (mem, mods, pending, merged, fresh) = match modules::load(data)? {
             Some(l) => (l.mem, l.modules, l.pending, l.merged, false),
             None if sectored => {
                 let lang = seed::DEFAULT_LANGUAGE;
-                let mut m = Self::born_sectored(data, &here, lang, seed::placeholder_user(lang), true)?;
+                let mut m = Self::born_sectored(data, &here, character, lang, seed::placeholder_user(lang), true)?;
                 // Born now: the first-launch screen still has to ask who she lives with.
                 m.set_meta(FIRST_RUN, PENDING);
                 (m, Self::core_modules(), Vec::new(), 0, true)
@@ -642,15 +654,16 @@ impl Mind {
     /// ends up sectored. The old seed is not involved: the sectored one brings her whole core, and
     /// the first version's canon nodes are not folded in anyway (only what was chatted or learned).
     /// The memory records the seed it was born from (`semilla`) and the name it was born with.
-    fn born_sectored(data: &Path, here: &Source, lang: &str, user: &str, fold_v1: bool) -> Result<Memory, String> {
+    fn born_sectored(data: &Path, here: &Source, character: &crate::character::Character, lang: &str, user: &str, fold_v1: bool) -> Result<Memory, String> {
         let now = unix_now();
         let mut base = Memory::default();
         let old = data.join("kaltsit.cthg");
-        if fold_v1 && old.exists() {
+        // The first version's memory was Kal'tsit's: only hers folds it in.
+        if fold_v1 && old.exists() && character.id == crate::character::KALTSIT.id {
             Self::fold_in(&mut base, &old, here)?;
         }
-        let (mut m, _report) = import::curated(&base, now, seed::build_base(lang, user)?)?;
-        m.set_meta("semilla", seed::Born::of_language(lang).meta());
+        let (mut m, _report) = import::curated(&base, now, seed::build_character(character, lang, user)?)?;
+        m.set_meta("semilla", &seed::Born::of(character, lang).meta());
         m.set_meta("usuario", user);
         // The same dating as the old seed: what is hers here is born the moment she is.
         for n in m.nodes.iter_mut().filter(|n| n.y > TERRA && n.origin == Origin::Canon) {
@@ -841,6 +854,7 @@ impl Mind {
         match Self::born_from(&self.mem)? {
             seed::Born::Personal => seed::build_personal(),
             seed::Born::Base(lang) => seed::build_base(lang, &self.user),
+            seed::Born::Character(id, lang) => seed::build_character(crate::character::get(id).ok_or_else(|| format!("personaje desconocido: {id}"))?, lang, &self.user),
         }
     }
 
@@ -864,7 +878,7 @@ impl Mind {
             return Err(format!("idioma desconocido: {language}"));
         }
         let here = self.mem.sources.get(self.source as usize).cloned().unwrap_or_default();
-        let mut mem = Self::born_sectored(&self.data, &here, language, name, false)?;
+        let mut mem = Self::born_sectored(&self.data, &here, self.character(), language, name, false)?;
         mem.set_meta("identidad", &IDENTITY.to_string());
         mem.set_meta(FIRST_RUN, DONE);
         self.mem = mem;
@@ -1344,7 +1358,7 @@ impl Mind {
             let (templates, saved) = crate::minecraft_bridge::buildables();
             // The default names are identifiers the mod knows, whatever the language.
             let templates = if templates.is_empty() { "casa, refugio, torre, muro, puente, corral, plataforma".to_string() } else { templates.join(", ") };
-            base.push_str(&lang::minecraft_section(self.lang(), user, &templates, &saved));
+            base.push_str(&lang::minecraft_section(self.lang(), self.character().name, user, &templates, &saved));
         }
         base
     }
@@ -1712,6 +1726,30 @@ impl Mind {
         ep
     }
 
+    /// Her plans from a day ago on (scheduled or dated memories of her own life): when (unix),
+    /// what, and its text. For the shared agenda.
+    pub fn upcoming(&self) -> Vec<(f64, String, String)> {
+        let from = unix_now() - 86_400.0;
+        let mut v: Vec<(f64, String, String)> = self
+            .mem
+            .nodes
+            .iter()
+            .filter(|n| n.y >= TERRA && (n.has(flags::SCHEDULED) || n.has(DATED)))
+            .map(|n| (clock::unix_of(n.y), n.label.clone(), n.text.clone()))
+            .filter(|p| p.0 >= from)
+            .collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v
+    }
+
+    /// Something worked on (a long session, or a day's summary), as an episode of her life.
+    pub fn record_activity(&mut self, label: &str, body: &str) -> u32 {
+        self.sync_clock();
+        let ep = learn::record_episode(&mut self.mem, P, label, body, body, &[], &[]);
+        self.stamp();
+        ep
+    }
+
     pub fn record_reply(&mut self, user_text: &str, reply: &str, recalled: &[u32]) -> u32 {
         self.sync_clock();
         let ep = learn::record_turn(&mut self.mem, P, user_text, reply, recalled);
@@ -1760,7 +1798,7 @@ impl Mind {
             lang::extraction_sector_line(l, &list.join(", "))
         };
         let user = &self.user;
-        let system = lang::extraction_system(l, user, &sector_line);
+        let system = lang::extraction_system(l, self.character().name, user, &sector_line);
         let context = lang::extraction_context(l, &now_line(l), &if list.is_empty() { lang::none_listed(l).to_string() } else { list }, user, user_text);
         Extraction { messages: vec![Msg::text("system", system), Msg::text("user", context)], numbered, sectors: offered.into_iter().map(|(k, _)| k).collect(), themes: Vec::new() }
     }
@@ -1905,7 +1943,7 @@ impl Mind {
         let l = self.lang();
         let lived_list: String = lived.iter().rev().map(|n| format!("- ({}) {}\n", clock::when(clock::unix_of(n.y), now, false, l), text::clip(&n.text, 180))).collect();
         let user = &self.user;
-        let system = lang::reflection_system(l, user);
+        let system = lang::reflection_system(l, self.character().name, user);
         let mut user_msg = lang::reflection_user(l, &now_line(l), &if known_list.is_empty() { lang::nothing_yet(l).to_string() } else { known_list }, &lived_list);
         let themes = subsectors::themes(&self.mem);
         if !themes.is_empty() {
@@ -2079,7 +2117,7 @@ mod tests {
     /// it. `Mind::open` itself now gives a new install the sectored seed (see the tests at the end).
     fn mind(name: &str) -> (Mind, PathBuf) {
         let d = tmp(name);
-        (Mind::open_as(&d, "modelo-de-prueba", false).unwrap(), d)
+        (Mind::open_as(&d, "modelo-de-prueba", false, &crate::character::KALTSIT).unwrap(), d)
     }
 
     /// Teaches her facts through the same path the extractor's JSON takes.

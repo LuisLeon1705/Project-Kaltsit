@@ -534,15 +534,19 @@ fn play_blocking(_samples: &[f32], _rate: u32, _turn: u64) {}
 // ── the voice thread ──
 
 enum Job {
-    Say(Setup, String, u64),
+    /// Voice, text, turn, and who says it (her id: her mouth moves with it).
+    Say(Setup, String, u64, String),
     Warm(Setup),
 }
+
+/// Who is speaking right now (the piece playing), for `ON_PLAY`.
+static SPEAKER: Mutex<String> = Mutex::new(String::new());
 
 /// Bumped by every new utterance and by `stop`: older pieces are dropped, unplayed.
 static TURN: AtomicU64 = AtomicU64::new(0);
 /// Told the loudness of what is playing, `MOUTH_FPS` times a second, and 0 when it ends or is
 /// cut: the chibi moves her mouth with it.
-static ON_PLAY: OnceLock<Box<dyn Fn(f32) + Send + Sync>> = OnceLock::new();
+static ON_PLAY: OnceLock<Box<dyn Fn(&str, f32) + Send + Sync>> = OnceLock::new();
 
 /// How often the loudness is measured and told.
 pub const MOUTH_FPS: u32 = 30;
@@ -561,22 +565,23 @@ pub fn loudness(samples: &[f32], rate: u32) -> Vec<f32> {
 }
 
 /// Where the loudness goes (set once, at start-up).
-pub fn on_play(f: impl Fn(f32) + Send + Sync + 'static) {
+pub fn on_play(f: impl Fn(&str, f32) + Send + Sync + 'static) {
     let _ = ON_PLAY.set(Box::new(f));
 }
 
 /// Told every piece she is about to say (samples and rate): the fine ear learns her voice from
 /// it, so that when the microphone hears it back from the speakers it knows it is hers.
-static ON_PIECE: OnceLock<Box<dyn Fn(&[f32], u32) + Send + Sync>> = OnceLock::new();
+static ON_PIECE: OnceLock<Box<dyn Fn(&str, &[f32], u32) + Send + Sync>> = OnceLock::new();
 
 /// Where each synthesized piece goes (set once, at start-up).
-pub fn on_piece(f: impl Fn(&[f32], u32) + Send + Sync + 'static) {
+pub fn on_piece(f: impl Fn(&str, &[f32], u32) + Send + Sync + 'static) {
     let _ = ON_PIECE.set(Box::new(f));
 }
 
 fn tell(level: f32) {
     if let Some(f) = ON_PLAY.get() {
-        f(level);
+        let who = SPEAKER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        f(&who, level);
     }
 }
 /// Reported to the app: why the last utterance failed, if it did.
@@ -589,8 +594,9 @@ fn worker() -> &'static Mutex<Sender<Job>> {
         let (ptx, prx) = channel::<Piece>();
         std::thread::spawn(move || synth_loop(rx, ptx));
         std::thread::spawn(move || {
-            for (turn, samples, rate) in prx {
+            for (turn, samples, rate, who) in prx {
                 if turn == TURN.load(Ordering::Acquire) {
+                    *SPEAKER.lock().unwrap_or_else(|e| e.into_inner()) = who;
                     PLAYING.store(true, Ordering::Release);
                     play_blocking(&samples, rate, turn);
                     PLAYING.store(false, Ordering::Release);
@@ -615,20 +621,20 @@ fn ensure<'a>(voice: &'a mut Option<Tts>, s: &Setup) -> Result<&'a Tts, String> 
 }
 
 /// A piece ready to play: its turn, its samples and their rate.
-type Piece = (u64, Vec<f32>, u32);
+type Piece = (u64, Vec<f32>, u32, String);
 
 fn synth_loop(rx: Receiver<Job>, play: Sender<Piece>) {
     let mut voice: Option<Tts> = None;
     let fail = |e: String| *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = e;
     while let Ok(job) = rx.recv() {
-        let (s, text, turn) = match job {
+        let (s, text, turn, who) = match job {
             Job::Warm(s) => {
                 if let Err(e) = ensure(&mut voice, &s) {
                     fail(e);
                 }
                 continue;
             }
-            Job::Say(s, t, turn) => (s, t, turn),
+            Job::Say(s, t, turn, who) => (s, t, turn, who),
         };
         let v = match ensure(&mut voice, &s) {
             Ok(v) => v,
@@ -648,9 +654,9 @@ fn synth_loop(rx: Receiver<Job>, play: Sender<Piece>) {
                         eprintln!("voz: {:.1} s de audio · «{}»", samples.len() as f32 / rate as f32, piece.chars().take(60).collect::<String>());
                     }
                     if let Some(f) = ON_PIECE.get() {
-                        f(&samples, rate);
+                        f(&who, &samples, rate);
                     }
-                    let _ = play.send((turn, samples, rate));
+                    let _ = play.send((turn, samples, rate, who.clone()));
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -662,14 +668,15 @@ fn synth_loop(rx: Receiver<Job>, play: Sender<Piece>) {
     }
 }
 
-/// Says `text` out loud, cutting off whatever she was saying.
-pub fn say(s: Setup, text: &str) {
+/// Says `text` out loud in companion `who`'s voice. `cut`: whatever was being said stops;
+/// otherwise it waits its turn after it (two companions answering one after the other).
+pub fn say(s: Setup, text: &str, who: &str, cut: bool) {
     let text = speakable(text);
     if text.is_empty() {
         return;
     }
-    let turn = TURN.fetch_add(1, Ordering::AcqRel) + 1;
-    let _ = worker().lock().unwrap_or_else(|e| e.into_inner()).send(Job::Say(s, text, turn));
+    let turn = if cut { TURN.fetch_add(1, Ordering::AcqRel) + 1 } else { TURN.load(Ordering::Acquire) };
+    let _ = worker().lock().unwrap_or_else(|e| e.into_inner()).send(Job::Say(s, text, turn, who.to_string()));
 }
 
 /// Loads the voice ahead of time, so the first reply does not wait for it.
@@ -755,7 +762,7 @@ mod tests {
         use std::time::Instant;
         static HEARD: Mutex<Vec<(f32, f32)>> = Mutex::new(Vec::new());
         static START: OnceLock<Instant> = OnceLock::new();
-        on_play(|level| HEARD.lock().unwrap().push((START.get().unwrap().elapsed().as_secs_f32(), level)));
+        on_play(|_, level| HEARD.lock().unwrap().push((START.get().unwrap().elapsed().as_secs_f32(), level)));
         let rate = 24000;
         let tone: Vec<f32> = (0..rate * 9 / 10)
             .map(|i| if (rate * 3 / 10..rate * 6 / 10).contains(&i) { 0.05 * (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() } else { 0.0 })
@@ -788,7 +795,7 @@ mod tests {
     #[test]
     fn real_voices_speak_when_downloaded() {
         let m = Manifest::load();
-        for id in ["voz-daniela", "voz-kokoro-dora", "voz-kaltsit-en"] {
+        for id in ["voz-daniela", "voz-kokoro-dora", "voz-kaltsit-en", "voz-lappland-en"] {
             let Ok(s) = setup(&m, id, 1.0) else {
                 eprintln!("{id}: no descargada, se salta");
                 continue;

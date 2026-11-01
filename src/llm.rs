@@ -4,6 +4,16 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
+/// Companions sharing a server take turns: one request at a time to each URL (a second one
+/// waits until the first has finished, streamed reply included). Each server has its own turn.
+fn turn(url: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static TURNS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut all = TURNS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    all.entry(url.to_string()).or_default().clone()
+}
+
 #[derive(Clone, Debug)]
 pub struct Llm {
     pub url: String,
@@ -63,6 +73,8 @@ impl Llm {
 
     /// Streams her words, calling `on_token` for each piece (return `false` to stop).
     pub fn chat_stream(&self, messages: &[Msg], temperature: f32, max_tokens: u32, mut on_token: impl FnMut(&str) -> bool) -> Result<String, String> {
+        let turn = turn(&self.url);
+        let _turn = turn.lock().unwrap_or_else(|e| e.into_inner());
         let body = json!({
             "model": self.model,
             "messages": messages,
@@ -98,6 +110,8 @@ impl Llm {
 
     /// One call constrained to a JSON schema.
     pub fn chat_json(&self, messages: &[Msg], schema: &Value, slot: u32, temperature: f32, max_tokens: u32) -> Result<Value, String> {
+        let turn = turn(&self.url);
+        let _turn = turn.lock().unwrap_or_else(|e| e.into_inner());
         let body = json!({
             "model": self.model, "messages": messages, "stream": false,
             "temperature": temperature, "max_tokens": max_tokens,

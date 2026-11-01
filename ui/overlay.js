@@ -2,15 +2,39 @@
 // here is driven by events from the backend.
 "use strict";
 
-const { listen } = window.__TAURI__.event;
+const { listen: listenAll } = window.__TAURI__.event;
 const { invoke } = window.__TAURI__.core;
+
+// Which companion this window is: its label says it ("overlay" is Kal'tsit's, "overlay-<id>" the
+// others'). Every event says whose it is; this window only listens to hers (and to the ones that
+// are nobody's, like the language).
+const LABEL = (window.__TAURI__.window && window.__TAURI__.window.getCurrentWindow().label) || "overlay";
+const ME = LABEL === "overlay" ? "kaltsit" : LABEL.replace(/^overlay-/, "");
+const listen = (ev, f) => listenAll(ev, (e) => { if (!e.payload || !e.payload.who || e.payload.who === ME) f(e); });
 
 // The language of the app comes with its state; the chat can change it at any time.
 onLang(() => { document.title = t("overlay.title"); });
 invoke("state").then((s) => setLang(s.idioma)).catch(() => {});
 listen("k:state", (e) => { if (e.payload && e.payload.idioma) setLang(e.payload.idioma); });
 
-const chibi = new Chibi(document.getElementById("chibi"));
+// Her body: the one chosen for her (Modelos → Cuerpo): her Spine chibi, downloaded on demand,
+// or her pixel art (personajes/<id>/). Changing it reloads this window with the other.
+const NAMES = { kaltsit: "Kal'tsit", lappland: "Lappland" };
+document.querySelector("#bubble .who").textContent = NAMES[ME] || ME;
+document.title = NAMES[ME] || ME;
+const made = invoke("body_of", { who: ME })
+  .catch(() => ({ cuerpo: ME === "kaltsit" ? "spine" : "pixel", spine: "003_kalts" }))
+  .then((b) => {
+    const c = document.getElementById("chibi");
+    const pose = (body) => { if (b.pose && b.pose !== "Relax") body.ready.then(() => body.play(b.pose)); return body; };
+    if (b.cuerpo !== "pixel") return pose(new Chibi(c, b.spine, ME));
+    // Pixel for pixel: the canvas takes her size; the bubble sits over her head.
+    c.style.width = c.style.height = "auto";
+    const body = new SpriteBody(c, ME);
+    body.ready.then((x) => { document.getElementById("bubble").style.bottom = `${x.h - 20}px`; });
+    return pose(body);
+  });
+listen("k:cuerpo", () => location.reload());
 const bubble = document.getElementById("bubble");
 const textEl = document.getElementById("text");
 // The bubble shows the end of what she says; the whole text is in the chat.
@@ -49,7 +73,7 @@ function hideLater(text) {
   hideTimer = setTimeout(() => bubble.classList.remove("show"), Math.max(5000, (text.length / 14) * 1000 + 2500));
 }
 
-chibi.ready.then(() => {
+made.then((chibi) => chibi.ready.then(() => {
   listen("k:anim", (e) => chibi.play(e.payload.name, e.payload.loop !== false));
   listen("k:face", (e) => chibi.face(!!e.payload.left));
   listen("k:voz", (e) => chibi.speak(e.payload.level));
@@ -76,4 +100,4 @@ chibi.ready.then(() => {
   listen("k:error", () => {
     bubble.classList.remove("thinking", "show");
   });
-});
+}));

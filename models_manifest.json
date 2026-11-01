@@ -343,6 +343,40 @@
       }
     },
     {
+      "id": "voz-lappland-en",
+      "tipo": "voz",
+      "nivel": "medio",
+      "nombre": "Lappland (inglés) · Pocket TTS",
+      "nota": "Su voz, clonada de 7 s de una de sus líneas en inglés del juego (arknights.wiki.gg). Habla en inglés: dice una versión breve en inglés de cada respuesta. Solo para uso personal.",
+      "archivos": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+          "destino": "voz/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+          "bytes": 98336520,
+          "sha256": "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb",
+          "rol": "zip",
+          "extraer": "voz"
+        },
+        {
+          "url": "https://arknights.wiki.gg/images/Lappland-002-EN.ogg",
+          "destino": "voz/lappland/Lappland-002-EN.ogg",
+          "bytes": 62215,
+          "sha256": "3508e72cf7a75945cf0ed97b1633aa469395939729fbe8c4841b096c68dc858a",
+          "rol": "referencia",
+          "convertir": "voz/lappland/referencia.wav"
+        }
+      ],
+      "voz": {
+        "motor": "pocket",
+        "carpeta": "voz/sherpa-onnx-pocket-tts-int8-2026-01-26",
+        "idioma": "en",
+        "referencia": "voz/lappland/referencia.wav",
+        "ajustes": {
+          "temperature": 0.7
+        }
+      }
+    },
+    {
       "id": "llama-b11633-cuda12",
       "tipo": "motor",
       "nivel": "ligero",
