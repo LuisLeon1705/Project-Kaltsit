@@ -5,9 +5,18 @@
 # Original downloads; Spine models are downloaded on demand into modelos/spine/
 /assets/
 /ui/spine/
-# Runtime memory and state (created locally on first run)
+# Runtime memory and state (created locally on first run): her memory, the shared bank and
+# agenda, local.json (Telegram tokens, link keys) and comun/calendario.json (calendar tokens)
 /data/
 /data_backup/
+# Credentials downloaded by hand (Google's OAuth client JSON, Azure, any key) wherever they land
+client_secret*.json
+*credentials*.json
+*.token
+.env
+.env.*
+*.pem
+*.p12
 # Optional personal seed (never tracked in the public repository)
 /seed/kaltsit_sectores.ron
 # Optional legacy personal seed (before sectors; never tracked in the public repository)

@@ -32,6 +32,9 @@ mod personal_core;
 mod screen;
 mod sensor;
 mod voice;
+mod telegram;
+mod calendar;
+mod when;
 
 use life::Core;
 use serde_json::{json, Value};
@@ -330,6 +333,156 @@ async fn common_bank(core: State<'_, Shared>) -> Reply {
     let root = core.common.parent().unwrap_or(&core.common).to_path_buf();
     let elsewhere: Vec<Value> = core.net.everyone().into_iter().map(|p| json!({ "equipo": p.name, "crew": p.status.crew })).collect();
     Ok(json!({ "agenda": common::agenda(&root), "notas": common::notes(&root), "equipos": elsewhere }))
+}
+
+// ── Servicios: Telegram and the calendar ──
+
+/// A companion's bot, as the app shows it (never the token).
+fn telegram_json(core: &Core) -> Value {
+    let t = core.local.lock().unwrap_or_else(|e| e.into_inner()).telegram.clone();
+    let code = core.tg_code.lock().unwrap_or_else(|e| e.into_inner()).clone().filter(|(_, until)| mind::unix_now() < *until);
+    json!({
+        "id": core.who.id, "name": core.who.name, "color": core.who.color,
+        "token": !t.token.is_empty(), "bot": t.bot, "vinculado": t.chat != 0, "usuario": t.usuario,
+        "avisos": t.avisos, "aviso_min": t.aviso_min, "audio": t.audio,
+        "codigo": code.as_ref().map(|c| c.0.clone()), "quedan": code.map(|c| (c.1 - mind::unix_now()).round()),
+        "escucha": core.role() == life::Role::Brain, "error": core.tg_error.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        "ffmpeg": telegram::ffmpeg().is_some(),
+    })
+}
+
+/// Everyone's bots.
+#[tauri::command]
+async fn telegram_state(crew: State<'_, Arc<life::Crew>>) -> Reply {
+    Ok(json!(crew.all.iter().map(|c| telegram_json(c)).collect::<Vec<_>>()))
+}
+
+/// A companion's bot: its token (checked with Telegram), whether to announce her plans and how
+/// long before, how often an answer also goes as a voice note.
+#[tauri::command]
+async fn telegram_set(crew: State<'_, Arc<life::Crew>>, who: String, token: Option<String>, avisos: Option<bool>, aviso_min: Option<u32>, audio: Option<f32>) -> Reply {
+    let core = crew.get(Some(&who)).clone();
+    let bot = match token.as_deref().map(str::trim) {
+        Some("") => Some(String::new()),
+        Some(t) => Some(telegram::get_me(t)?),
+        None => None,
+    };
+    {
+        let mut l = core.local.lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(t), Some(b)) = (token, bot) {
+            // Another bot: the old link does not hold.
+            if t.trim() != l.telegram.token {
+                l.telegram.chat = 0;
+                l.telegram.usuario.clear();
+            }
+            l.telegram.token = t.trim().to_string();
+            l.telegram.bot = b;
+        }
+        if let Some(a) = avisos {
+            l.telegram.avisos = a;
+        }
+        if let Some(m) = aviso_min {
+            l.telegram.aviso_min = m.clamp(5, 24 * 60);
+        }
+        if let Some(a) = audio {
+            l.telegram.audio = a.clamp(0.0, 1.0);
+        }
+        l.save(&core.data);
+    }
+    Ok(telegram_json(&core))
+}
+
+/// Shows a code to type to her bot, valid ten minutes; or forgets the linked chat.
+#[tauri::command]
+async fn telegram_link(crew: State<'_, Arc<life::Crew>>, who: String, open: bool) -> Reply {
+    let core = crew.get(Some(&who)).clone();
+    if open {
+        let seed = u64::from_le_bytes(net::new_identity().as_bytes()[..8].try_into().unwrap_or([7; 8]));
+        *core.tg_code.lock().unwrap_or_else(|e| e.into_inner()) = Some((telegram::code_of(seed), mind::unix_now() + 600.0));
+    } else {
+        let mut l = core.local.lock().unwrap_or_else(|e| e.into_inner());
+        l.telegram.chat = 0;
+        l.telegram.usuario.clear();
+        l.save(&core.data);
+    }
+    Ok(telegram_json(&core))
+}
+
+fn household(crew: &life::Crew) -> std::path::PathBuf {
+    let lead = crew.lead();
+    lead.common.parent().unwrap_or(&lead.common).to_path_buf()
+}
+
+#[tauri::command]
+async fn calendar_state(crew: State<'_, Arc<life::Crew>>) -> Reply {
+    Ok(calendar::load(&household(&crew)).public_json())
+}
+
+/// The app registered for a calendar (its client id, and Google's client secret).
+#[tauri::command]
+async fn calendar_set(crew: State<'_, Arc<life::Crew>>, provider: String, client_id: String, client_secret: Option<String>) -> Reply {
+    let root = household(&crew);
+    let mut c = calendar::load(&root);
+    let a = c.account(&provider)?;
+    if a.client_id != client_id.trim() {
+        a.refresh.clear();
+        a.cuenta.clear();
+    }
+    a.client_id = client_id.trim().to_string();
+    if let Some(s) = client_secret {
+        a.client_secret = s.trim().to_string();
+    }
+    calendar::save(&root, &c);
+    Ok(c.public_json())
+}
+
+/// Opens the browser to connect a calendar and waits for the answer (three minutes at most).
+#[tauri::command]
+async fn calendar_connect(crew: State<'_, Arc<life::Crew>>, provider: String) -> Reply {
+    let root = household(&crew);
+    let r = root.clone();
+    tauri::async_runtime::spawn_blocking(move || calendar::connect(&r, &provider)).await.map_err(|e| e.to_string())??;
+    sync_calendars(&crew);
+    Ok(calendar::load(&root).public_json())
+}
+
+#[tauri::command]
+async fn calendar_disconnect(crew: State<'_, Arc<life::Crew>>, provider: String) -> Reply {
+    let root = household(&crew);
+    calendar::disconnect(&root, &provider)?;
+    let _ = std::fs::remove_file(common::dir(&root).join("agenda").join(format!("{provider}.json")));
+    Ok(calendar::load(&root).public_json())
+}
+
+#[tauri::command]
+async fn calendar_sync(crew: State<'_, Arc<life::Crew>>) -> Reply {
+    let c = crew.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || sync_calendars(&c)).await.map_err(|e| e.to_string())?;
+    Ok(calendar::load(&household(&crew)).public_json())
+}
+
+/// One round with the calendars: their events into the agenda, the plans of the companions here
+/// into them.
+fn sync_calendars(crew: &life::Crew) {
+    for c in &crew.all {
+        c.export_plans();
+    }
+    // Only where each one thinks: two computers never add the same plan.
+    let here: Vec<(&str, &str)> = crew.all.iter().filter(|c| c.role() == life::Role::Brain).map(|c| (c.who.id, c.who.name)).collect();
+    if calendar::sync(&household(crew), &here) {
+        crew.lead().emit("k:comun", json!({}));
+    }
+}
+
+/// Every three minutes, while a calendar is connected.
+fn spawn_calendar_sync(crew: Arc<life::Crew>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(180));
+        let c = calendar::load(&household(&crew));
+        if !c.google.refresh.is_empty() || !c.outlook.refresh.is_empty() {
+            sync_calendars(&crew);
+        }
+    });
 }
 
 /// Who lives on this computer (the selector's choice) and who could.
@@ -762,6 +915,10 @@ fn launch(app: &tauri::AppHandle, chosen: Vec<&'static character::Character>, ne
     // brain, body and memory go only to computers where she leads too; the bank to all of them.
     lead.net.set_crew(crew.all.iter().map(|c| c.who.id.to_string()).collect());
     spawn_bank_sync(crew.clone());
+    spawn_calendar_sync(crew.clone());
+    for core in &crew.all {
+        life::spawn_telegram(core.clone());
+    }
     let c = lead.clone();
     if let Err(e) = lead.net.serve(move |m, p, from, v| c.handle(m, p, from, v)) {
         eprintln!("{e}");
@@ -933,7 +1090,7 @@ fn main() {
                 window.app_handle().exit(0);
             }
         })
-        .invoke_handler(tauri::generate_handler![history, state, memory, memory_graph, open_viewer, red, send, type_chat, look_now, set_config, set_user, first_run, think_here, resolve_proposal, set_neighbor, pairing, link_request, link_answer, unlink, set_public_networks, set_chat_capture, engine_state, engine_restart, engine_set, set_voice, voices, voice_test, mic_start, mic_stop, voice_name, voice_clip, voice_name_clip, open_mic, activity_days, activity_day, common_bank, team, set_team, characters, start_crew, body_of, bodies, set_body, models_state, model_download, model_use, model_add, model_remove, chibi_model, accessories_state, accessory_install, accessory_uninstall, accessory_fabric_api, accessories_config, open_folder, minecraft_plan, minecraft_order])
+        .invoke_handler(tauri::generate_handler![history, state, memory, memory_graph, open_viewer, red, send, type_chat, look_now, set_config, set_user, first_run, think_here, resolve_proposal, set_neighbor, pairing, link_request, link_answer, unlink, set_public_networks, set_chat_capture, engine_state, engine_restart, engine_set, set_voice, voices, voice_test, mic_start, mic_stop, voice_name, voice_clip, voice_name_clip, open_mic, activity_days, activity_day, common_bank, team, set_team, telegram_state, telegram_set, telegram_link, calendar_state, calendar_set, calendar_connect, calendar_disconnect, calendar_sync, characters, start_crew, body_of, bodies, set_body, models_state, model_download, model_use, model_add, model_remove, chibi_model, accessories_state, accessory_install, accessory_uninstall, accessory_fabric_api, accessories_config, open_folder, minecraft_plan, minecraft_order])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Kal'tsit");
 }

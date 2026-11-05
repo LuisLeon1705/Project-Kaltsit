@@ -226,6 +226,14 @@ pub struct Core {
     asked: Mutex<Option<String>>,
     /// Last work area seen: a hidden window cannot always tell which monitor it is on.
     last_area: Mutex<Option<(f64, f64, f64, f64, f64, f64)>>,
+    /// Answering Telegram: her voice stays quiet at home (the user is not there).
+    hush: AtomicBool,
+    /// Telegram: the code to link the user's chat, and until when it is valid.
+    pub tg_code: Mutex<Option<(String, f64)>>,
+    /// Telegram: what went wrong last (empty: nothing).
+    pub tg_error: Mutex<String>,
+    /// The user's calendar as she was last told it (she is told again when it changes).
+    cal_seen: Mutex<String>,
 }
 
 /// What happens to her body, for the console of a debug build.
@@ -297,6 +305,10 @@ impl Core {
             body_on: Mutex::new(me),
             here: AtomicBool::new(true),
             pending_enter: Mutex::new(None),
+            hush: AtomicBool::new(false),
+            tg_code: Mutex::new(None),
+            tg_error: Mutex::new(String::new()),
+            cal_seen: Mutex::new(String::new()),
             outbox: Mutex::new(Vec::new()),
             linked: Mutex::new(HashSet::new()),
             sent: Mutex::new(HashMap::new()),
@@ -674,13 +686,20 @@ impl Core {
             Ok(f) => f,
             Err(e) => return self.emit("k:error", json!({ "text": Ui::ErrSaveMemory.say(&[&e.to_string()]) })),
         };
-        // Her plans go to the shared agenda.
-        let plans: Vec<crate::common::Plan> = self.mind().upcoming().into_iter().map(|(u, label, texto)| crate::common::Plan { u, label, texto, de: self.who.id.into() }).collect();
-        crate::common::export_agenda(self.common.parent().unwrap_or(&self.common), self.who.id, &plans);
+        self.export_plans();
         let peers: Vec<String> = lock(&self.linked).iter().cloned().collect();
         for p in peers {
             self.replicate(&p, &files);
         }
+    }
+
+    /// Her plans to the shared agenda (and from there to the user's calendar, if connected).
+    pub fn export_plans(&self) {
+        if !self.is_brain() {
+            return;
+        }
+        let plans: Vec<crate::common::Plan> = self.mind().upcoming().into_iter().map(|(u, label, texto)| crate::common::Plan { u, label, texto, de: self.who.id.into() }).collect();
+        crate::common::export_agenda(self.common.parent().unwrap_or(&self.common), self.who.id, &plans);
     }
 
     fn replicate(&self, peer: &str, files: &Files) {
@@ -919,6 +938,9 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
 
     /// Her reply out loud, where her body is, in the language of the voice there.
     fn voice_out(&self, text: &str) {
+        if self.hush.load(Ordering::Acquire) {
+            return;
+        }
         let on = lock(&self.body_on).clone();
         if on == self.me() {
             match self.voice_language().as_deref() {
@@ -1239,6 +1261,16 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
             }
             m.say(Speaker::User, text, &[]);
             let l = m.lang();
+            // A plan asked for in so many words goes to the agenda at once, with its own date
+            // and name (not left to the analyst, which may miss the date).
+            let asked = crate::when::request(text).and_then(|label| {
+                let at = clock::now_local().and_then(|now| crate::when::find(text, &now))?;
+                Some((label, clock::from_local(&at)?, at))
+            });
+            if let Some((label, u, at)) = asked.filter(|a| a.1 > unix_now()) {
+                m.schedule(&label, text, u);
+                m.say(Speaker::Narrator, &crate::lang::scheduled(l, &label, &clock::long(&at, l)), &[]);
+            }
             // Notes the others left her, read now (once).
             for n in crate::common::take_notes(self.common.parent().unwrap_or(&self.common), self.who.id) {
                 let from = crate::character::get(&n.de).map(|c| c.name).unwrap_or(n.de.as_str()).to_string();
@@ -1246,6 +1278,9 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
             }
             for (name, said) in others {
                 m.say(Speaker::Narrator, &crate::lang::group_said(l, name, said), &[]);
+            }
+            if let Some(items) = self.calendar_news(l) {
+                m.say(Speaker::Narrator, &crate::lang::calendar_says(l, &items), &[]);
             }
         }
         if echo {
@@ -2172,6 +2207,201 @@ pub fn spawn_mind_clock(core: Arc<Core>) {
             if let Err(e) = core.reflect() {
                 core.status("");
                 core.emit("k:error", json!({ "text": e }));
+            }
+        }
+    });
+}
+
+// ── Telegram ──
+
+impl Core {
+    /// The user's calendar events of the next two days, if they changed since she was told.
+    fn calendar_news(&self, l: lang::Lang) -> Option<String> {
+        let bank = crate::common::bank(self.common.parent().unwrap_or(&self.common));
+        let now = unix_now();
+        let mut ev: Vec<&crate::common::Plan> = crate::calendar::PROVIDERS.iter().filter_map(|k| bank.agenda.get(*k)).flatten().filter(|p| p.u > now - 3600.0 && p.u < now + 2.0 * 86_400.0).collect();
+        ev.sort_by(|a, b| a.u.total_cmp(&b.u));
+        let days = if l == lang::Lang::En { ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] } else { ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"] };
+        let items: Vec<String> = ev
+            .iter()
+            .take(12)
+            .filter_map(|p| clock::to_local(p.u).map(|t| format!("{} {:02}:{:02} {}", days[t.weekday as usize % 7], t.hour, t.minute, p.label)))
+            .collect();
+        let items = if items.is_empty() { (if l == lang::Lang::En { "nothing" } else { "nada" }).to_string() } else { items.join("; ") };
+        let mut seen = lock(&self.cal_seen);
+        if *seen == items || (seen.is_empty() && ev.is_empty()) {
+            return None;
+        }
+        *seen = items.clone();
+        Some(items)
+    }
+
+    fn is_lead(&self) -> bool {
+        self.app.try_state::<Arc<Crew>>().is_none_or(|c| c.lead().who.id == self.who.id)
+    }
+
+    /// A message to her bot: the linking code from a new chat, or something to answer from the
+    /// linked one. Anything else is ignored (a bot can be found by anyone).
+    fn telegram_message(self: &Arc<Self>, tg: &crate::telegram::Telegram, m: crate::telegram::Incoming) {
+        use crate::telegram as t;
+        if !m.private || m.text.trim().is_empty() {
+            return;
+        }
+        if tg.chat == 0 || m.chat != tg.chat {
+            let code = lock(&self.tg_code).clone().filter(|(_, until)| unix_now() < *until).map(|c| c.0);
+            if let Some(_) = code.filter(|c| t::has_code(&m.text, c)) {
+                {
+                    let mut l = lock(&self.local);
+                    l.telegram.chat = m.chat;
+                    l.telegram.usuario = m.from.clone();
+                    l.save(&self.data);
+                }
+                *lock(&self.tg_code) = None;
+                let user = self.mind().user.clone();
+                let _ = t::send_message(&tg.token, m.chat, &lang::tr(format!("Listo, {user}. Desde ahora te leo por aquí. — {}", self.who.name), format!("Done, {user}. From now on I read you here. — {}", self.who.name)));
+                self.emit_local("k:telegram", json!({ "who": self.who.id }));
+            } else if tg.chat == 0 {
+                let _ = t::send_message(&tg.token, m.chat, &lang::tr("Para hablar conmigo, escribe aquí el código que aparece en la app (Servicios → Telegram → Vincular).", "To talk to me, type here the code shown in the app (Services → Telegram → Link)."));
+            }
+            return;
+        }
+        if m.text.trim() == "/start" {
+            return;
+        }
+        let (core, tg) = (self.clone(), tg.clone());
+        std::thread::spawn(move || {
+            let done = Arc::new(AtomicBool::new(false));
+            {
+                let (done, token, chat) = (done.clone(), tg.token.clone(), tg.chat);
+                std::thread::spawn(move || {
+                    while !done.load(Ordering::Acquire) {
+                        t::typing(&token, chat);
+                        std::thread::sleep(Duration::from_secs(4));
+                    }
+                });
+            }
+            let answer = (|| {
+                if !core.take_voice(Duration::from_secs(120)) {
+                    return Err(Ui::ErrStillBusy.say(&[]));
+                }
+                let _free = Free(&core.busy);
+                if core.mind().config.reposo {
+                    let _ = core.configure(&json!({ "reposo": false }));
+                }
+                core.hush.store(true, Ordering::Release);
+                let l = core.mind().lang();
+                core.mind().say(Speaker::Narrator, &crate::lang::by_telegram(l), &[]);
+                let r = core.answer_with_ghosts(&m.text, &[], None, None, true, &[]);
+                core.hush.store(false, Ordering::Release);
+                r
+            })();
+            done.store(true, Ordering::Release);
+            match answer {
+                Ok(reply) => {
+                    let reply = crate::minecraft_bridge::spoken(&reply);
+                    if let Err(e) = t::send_message(&tg.token, tg.chat, &reply) {
+                        *lock(&core.tg_error) = e;
+                    }
+                    if roll() < tg.audio {
+                        if let Err(e) = core.telegram_voice(&tg, &reply) {
+                            eprintln!("telegram, voz: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    core.status("");
+                    let _ = t::send_message(&tg.token, tg.chat, &lang::tr(format!("(No pude responder: {e})"), format!("(I could not answer: {e})")));
+                }
+            }
+        });
+    }
+
+    /// Her answer as a voice note too: her voice (in English if that is what it speaks), as Opus.
+    fn telegram_voice(&self, tg: &crate::telegram::Telegram, text: &str) -> Result<(), String> {
+        let s = self.voice_setup()?;
+        let text = if s.idioma == "en" { self.in_english(text).ok_or("sin versión en inglés")? } else { text.to_string() };
+        let ffmpeg = crate::telegram::ffmpeg().ok_or("sin ffmpeg")?;
+        let (x, r) = crate::voice::render(&s, &text)?;
+        let ogg = crate::telegram::to_voice_note(&ffmpeg, &crate::download::wav(&x, r))?;
+        crate::telegram::send_voice(&tg.token, tg.chat, &ogg)
+    }
+
+    /// Her plans, and for the lead the user's calendar too, announced a while before.
+    fn telegram_reminders(&self, tg: &crate::telegram::Telegram) {
+        let root = self.common.parent().unwrap_or(&self.common).to_path_buf();
+        let mut plans: Vec<(f64, String)> = self.mind().upcoming().into_iter().map(|(u, l, _)| (u, l)).collect();
+        if self.is_lead() {
+            let bank = crate::common::bank(&root);
+            for p in crate::calendar::PROVIDERS.iter().filter_map(|k| bank.agenda.get(*k)).flatten() {
+                plans.push((p.u, p.label.clone()));
+            }
+        }
+        let file = self.data.join("telegram_avisos.json");
+        let mut done: Vec<String> = std::fs::read_to_string(&file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let now = unix_now();
+        for (u, label) in crate::telegram::due(&plans, now, tg.aviso_min, &done) {
+            let line = self.reminder_line(u, &label);
+            if crate::telegram::send_message(&tg.token, tg.chat, &line).is_ok() {
+                done.push(crate::telegram::key(u, &label));
+            }
+        }
+        let keep = done.len().saturating_sub(300);
+        done.drain(..keep);
+        let _ = std::fs::write(&file, serde_json::to_string(&done).unwrap_or_default());
+    }
+
+    /// A reminder in her own words (one line); a plain one if her model is not up.
+    fn reminder_line(&self, u: f64, label: &str) -> String {
+        let at = clock::to_local(u).map(|l| format!("{:02}:{:02}", l.hour, l.minute)).unwrap_or_default();
+        let mins = ((u - unix_now()) / 60.0).round().max(1.0) as i64;
+        let plain = lang::tr(format!("Recordatorio: {label} a las {at} (en {mins} min)."), format!("Reminder: {label} at {at} (in {mins} min)."));
+        if !self.is_brain() || !self.motor.healthy() {
+            return plain;
+        }
+        let (name, user, en) = { let m = self.mind(); (m.character().name, m.user.clone(), m.lang() == lang::Lang::En) };
+        let messages = vec![
+            Msg::text("system", format!("You are {name} (Arknights), messaging {user} on Telegram. Write ONE short message, in {}, in your own voice, reminding them of their plan. Keep its name, time and minutes as given; nothing else. Answer only with JSON.", if en { "English" } else { "Spanish" })),
+            Msg::text("user", format!("plan: {label}; time: {at}; in {mins} minutes")),
+        ];
+        let schema = json!({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] });
+        self.llm.chat_json(&messages, &schema, SLOT_ANALYSIS, 0.7, 120).ok().and_then(|v| v["text"].as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && s.contains(&at)).unwrap_or(plain)
+    }
+}
+
+/// A number in [0, 1) for "sometimes".
+fn roll() -> f32 {
+    let h = hash(&unix_now().to_bits().to_le_bytes());
+    (u64::from_str_radix(&h[..8], 16).unwrap_or(0) % 10_000) as f32 / 10_000.0
+}
+
+/// Her bot (see `telegram`): it listens only while this computer is her brain, so two computers
+/// never fight over it; her plans are announced once a minute at most.
+pub fn spawn_telegram(core: Arc<Core>) {
+    std::thread::spawn(move || {
+        let mut offset = 0i64;
+        let mut reminded = 0.0;
+        loop {
+            let tg = lock(&core.local).telegram.clone();
+            if tg.token.is_empty() || !core.is_brain() {
+                std::thread::sleep(Duration::from_secs(5));
+                continue;
+            }
+            if tg.chat != 0 && tg.avisos && unix_now() - reminded >= 60.0 {
+                reminded = unix_now();
+                core.telegram_reminders(&tg);
+            }
+            match crate::telegram::get_updates(&tg.token, offset, 25) {
+                Ok(msgs) => {
+                    lock(&core.tg_error).clear();
+                    offset = crate::telegram::next_offset(&msgs, offset);
+                    for m in msgs {
+                        core.telegram_message(&tg, m);
+                    }
+                }
+                Err(e) => {
+                    *lock(&core.tg_error) = e;
+                    std::thread::sleep(Duration::from_secs(15));
+                }
             }
         }
     });

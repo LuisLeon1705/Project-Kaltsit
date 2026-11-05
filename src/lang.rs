@@ -615,6 +615,30 @@ pub fn note_from(l: Lang, from: &str, text: &str) -> String {
     }
 }
 
+/// A plan the user asked for, already in the agenda (and in their calendar, if connected).
+pub fn scheduled(l: Lang, label: &str, when: &str) -> String {
+    match l {
+        Lang::Es => format!("Quedó en la agenda: «{label}», {when}. Confírmaselo con esa fecha y hora."),
+        Lang::En => format!("It is in the agenda now: “{label}”, {when}. Confirm it with that date and time."),
+    }
+}
+
+/// The message came by Telegram: the user is away from the computer.
+pub fn by_telegram(l: Lang) -> String {
+    match l {
+        Lang::Es => "Te escribe por Telegram, desde el teléfono: no está frente a la computadora (no ves su pantalla). Respóndele breve, como en un chat.".into(),
+        Lang::En => "They write to you on Telegram, from the phone: they are not at the computer (you do not see their screen). Answer briefly, as in a chat.".into(),
+    }
+}
+
+/// What is in the user's calendar (Google / Outlook) for the next days, when it changes.
+pub fn calendar_says(l: Lang, items: &str) -> String {
+    match l {
+        Lang::Es => format!("En el calendario del usuario (Google/Outlook), los próximos días: {items}. Si te habla de planes, tenlo en cuenta; los planes que te cuente se añaden a ese calendario."),
+        Lang::En => format!("In the user's calendar (Google/Outlook), the next days: {items}. If they talk about plans, keep it in mind; the plans they tell you are added to that calendar."),
+    }
+}
+
 /// After reflecting: whether to leave another companion a note. Answered as JSON {nota}.
 pub fn note_prompt(l: Lang, me: &str, other: &str, user: &str) -> String {
     match l {

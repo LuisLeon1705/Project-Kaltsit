@@ -1726,6 +1726,42 @@ impl Mind {
         ep
     }
 
+    /// A plan the user asked her to keep ("agéndame…"): a scheduled memory at `u` named `label`,
+    /// with what was said. The same plan asked again (same minute and name) is not added twice.
+    pub fn schedule(&mut self, label: &str, said: &str, u: f64) -> u32 {
+        let y = clock::year_of(u);
+        if let Some(n) = self.mem.nodes.iter().find(|n| n.has(flags::SCHEDULED) && (clock::unix_of(n.y) - u).abs() < 60.0 && n.label.eq_ignore_ascii_case(label)) {
+            return n.id;
+        }
+        let now = self.now();
+        let (alpha, beta) = Origin::Learned.prior();
+        self.counter += 1;
+        let key = format!("plan-{:x}{:04x}{:x}", (now * 1000.0) as u64, self.salt & 0xFFFF, self.counter);
+        let id = self.mem.add_node(Node {
+            id: 0,
+            kind: NodeKind::Event,
+            origin: Origin::Learned,
+            flags: DATED | if u > unix_now() { flags::SCHEDULED } else { 0 },
+            period: P,
+            x: 0.5,
+            y,
+            alpha: alpha + 3.0,
+            beta,
+            activation: 1.0,
+            recalls: 1,
+            created_turn: self.mem.turn,
+            key,
+            label: text::clip(label, 64),
+            text: text::clip(said, 300),
+            aliases: Vec::new(),
+            module: PERSONAS,
+            source: self.source,
+            born: now,
+        });
+        sectors::file_under(&mut self.mem, id, "personas");
+        id
+    }
+
     /// Her plans from a day ago on (scheduled or dated memories of her own life): when (unix),
     /// what, and its text. For the shared agenda.
     pub fn upcoming(&self) -> Vec<(f64, String, String)> {
@@ -1735,7 +1771,8 @@ impl Mind {
             .nodes
             .iter()
             .filter(|n| n.y >= TERRA && (n.has(flags::SCHEDULED) || n.has(DATED)))
-            .map(|n| (clock::unix_of(n.y), n.label.clone(), n.text.clone()))
+            // To the minute: the year as a float loses a fraction of a second (11:59:59.99).
+            .map(|n| ((clock::unix_of(n.y) / 60.0).round() * 60.0, n.label.clone(), n.text.clone()))
             .filter(|p| p.0 >= from)
             .collect();
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -3135,6 +3172,24 @@ mod tests {
         m.save().unwrap();
         let m = Mind::open(&d, "modelo-de-prueba").unwrap();
         assert_eq!(m.mem.nodes[m.mem.by_key("libre").unwrap() as usize].text, "Decido yo, y hoy prefiero callar.");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// "Agéndame…": the plan is in her agenda with its date and name, once, and survives a save.
+    #[test]
+    fn a_plan_asked_for_is_in_the_agenda() {
+        let (mut m, d) = mind("schedule");
+        let u = unix_now() + 4.0 * 86_400.0;
+        let said = "Puedes agendarme una cita el domingo a las 12 PM, llámala final del semestre";
+        let id = m.schedule("Final del semestre", said, u);
+        assert_eq!(m.schedule("final del semestre", said, u), id, "asked twice, kept once");
+        m.save().unwrap();
+        let m = Mind::open(&d, "modelo-de-prueba").unwrap();
+        let plans = m.upcoming();
+        let p = plans.iter().find(|p| p.1 == "Final del semestre").expect("in the agenda");
+        assert!((p.0 - u).abs() < 60.0, "at its time");
+        assert_eq!(p.0 % 60.0, 0.0, "to the minute");
+        assert_eq!(plans.iter().filter(|p| p.1 == "Final del semestre").count(), 1);
         let _ = std::fs::remove_dir_all(&d);
     }
 

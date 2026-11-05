@@ -3274,6 +3274,192 @@ listen("k:accesorio", async (e) => {
 });
 views.loaders.accessories = loadAccessories;
 
+// ── Servicios: Telegram (a bot for each companion) and the user's calendar ──
+const svc = { tg: null, cal: null, who: null, draft: {}, busy: null, poll: null };
+
+async function loadServices() {
+  const [tg, cal] = await Promise.all([invoke("telegram_state").catch(() => []), invoke("calendar_state").catch(() => null)]);
+  svc.tg = tg;
+  svc.cal = cal;
+  renderServices();
+}
+
+function svcButton(text, cls, onclick, disabled) {
+  const b = el("button", cls, text);
+  b.type = "button";
+  b.disabled = !!disabled;
+  b.onclick = onclick;
+  return b;
+}
+
+async function svcDo(key, f) {
+  svc.busy = key;
+  renderServices();
+  try { await f(); } catch (e) { add("error", String(e)); }
+  svc.busy = null;
+  await loadServices();
+}
+
+function steps(keys) {
+  const ol = el("ol", "svc-steps");
+  for (const k of keys) ol.append(el("li", "", t(k)));
+  return ol;
+}
+
+function telegramCard() {
+  const card = el("div", "net-card");
+  card.append(el("h4", "", t("svc.tg.title")), el("div", "hint", t("svc.tg.hint")));
+  const list = svc.tg || [];
+  if (!list.length) return card;
+  const who = list.find((x) => x.id === svc.who) || list[0];
+  card.append(crewSwitch(who.id, (id) => { svc.who = id; renderServices(); }));
+  const busy = svc.busy === `tg-${who.id}`;
+  if (!who.token) {
+    card.append(steps(["svc.tg.step1", "svc.tg.step2", "svc.tg.step3"]));
+    const r = el("div", "net-row");
+    const input = el("input", "grow");
+    input.type = "password";
+    input.placeholder = "123456789:AA…";
+    input.autocomplete = "off";
+    r.append(input, svcButton(busy ? "…" : t("svc.save"), "", () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, token: input.value })), busy));
+    card.append(r);
+    return card;
+  }
+  const head = el("div", "net-row");
+  head.append(el("b", "grow", t("svc.tg.bot", { bot: who.bot ? "@" + who.bot : "?" })));
+  head.append(el("span", `tag${who.escucha ? " body" : ""}`, who.escucha ? t("svc.tg.listening") : t("svc.tg.notHere")));
+  head.append(svcButton(t("svc.remove"), "ghost", () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, token: "" })), busy));
+  card.append(head);
+  if (!who.escucha) card.append(el("div", "hint", t("svc.tg.notHere.hint", { name: who.name })));
+  if (who.error) card.append(el("div", "hint warn", who.error));
+  // The link with the user's own chat.
+  const link = el("div", "net-row");
+  if (who.vinculado) {
+    link.append(el("span", "grow", t("svc.tg.linked", { user: who.usuario || "?" })));
+    link.append(svcButton(t("net.unlink"), "ghost", () => svcDo(`tg-${who.id}`, () => invoke("telegram_link", { who: who.id, open: false })), busy));
+  } else if (who.codigo) {
+    const code = el("b", "svc-code", who.codigo);
+    link.append(el("span", "grow", t("svc.tg.typeCode", { bot: "@" + who.bot })), code);
+    card.append(link);
+    card.append(el("div", "hint", t("svc.tg.codeLeft", { s: who.quedan })));
+    clearTimeout(svc.poll);
+    svc.poll = setTimeout(() => { if (isOpen("services")) loadServices(); }, 3000);
+  } else {
+    link.append(el("span", "grow hint", t("svc.tg.notLinked")));
+    link.append(svcButton(t("net.pair.link"), "", () => svcDo(`tg-${who.id}`, () => invoke("telegram_link", { who: who.id, open: true })), busy));
+  }
+  if (!who.codigo) card.append(link);
+  // Reminders and voice notes.
+  const rem = el("div", "net-row");
+  const on = el("label", "toggle grow");
+  const cb = el("input");
+  cb.type = "checkbox";
+  cb.checked = who.avisos;
+  cb.onchange = () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, avisos: cb.checked }));
+  on.append(cb, t("svc.tg.remind"));
+  const mins = el("select");
+  for (const m of [10, 15, 30, 60, 120]) {
+    const o = el("option", "", t("svc.tg.before", { m }));
+    o.value = m;
+    o.selected = m === who.aviso_min;
+    mins.append(o);
+  }
+  mins.onchange = () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, avisoMin: Number(mins.value) }));
+  rem.append(on, mins);
+  card.append(rem);
+  const au = el("div", "net-row");
+  au.append(el("span", "grow", t("svc.tg.voice")));
+  const sel = el("select");
+  for (const [v, k] of [[0, "never"], [0.15, "sometimes"], [0.4, "often"], [1, "always"]]) {
+    const o = el("option", "", t(`svc.tg.voice.${k}`));
+    o.value = v;
+    o.selected = Math.abs(v - who.audio) < 0.01;
+    sel.append(o);
+  }
+  sel.onchange = () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, audio: Number(sel.value) }));
+  au.append(sel);
+  card.append(au);
+  if (!who.ffmpeg && who.audio > 0) card.append(el("div", "hint warn", t("svc.tg.noFfmpeg")));
+  return card;
+}
+
+function calendarCard() {
+  const card = el("div", "net-card");
+  card.append(el("h4", "", t("svc.cal.title")), el("div", "hint", t("svc.cal.hint")));
+  const c = svc.cal;
+  if (!c) return card;
+  for (const p of ["google", "outlook"]) {
+    const a = c[p];
+    const box = el("div", "model");
+    const head = el("div", "net-row");
+    head.append(el("b", "grow", t(`svc.cal.${p}`)));
+    head.append(el("span", `tag${a.conectado ? " body" : ""}`, a.conectado ? t("svc.cal.connected") : a.configurado ? t("svc.cal.ready") : t("svc.cal.off")));
+    box.append(head);
+    const busy = svc.busy === `cal-${p}`;
+    const d = svc.draft[p] || (svc.draft[p] = { open: !a.configurado, id: a.client_id || "", secret: "" });
+    if (a.conectado) {
+      const r = el("div", "net-row");
+      r.append(el("span", "grow", t("svc.cal.as", { who: a.cuenta || "?" })));
+      r.append(svcButton(busy ? "…" : t("svc.cal.syncNow"), "ghost", () => svcDo(`cal-${p}`, () => invoke("calendar_sync")), busy));
+      r.append(svcButton(t("svc.cal.disconnect"), "ghost", () => svcDo(`cal-${p}`, () => invoke("calendar_disconnect", { provider: p })), busy));
+      box.append(r);
+    } else if (a.configurado && !d.open) {
+      const r = el("div", "net-row");
+      r.append(el("span", "grow hint", busy ? t("svc.cal.waiting") : t("svc.cal.connectHint")));
+      r.append(svcButton(t("svc.cal.change"), "ghost", () => { d.open = true; renderServices(); }, busy));
+      r.append(svcButton(busy ? "…" : t("svc.cal.connect"), "", () => svcDo(`cal-${p}`, () => invoke("calendar_connect", { provider: p })), busy));
+      box.append(r);
+    }
+    if (d.open) {
+      box.append(steps(p === "google" ? ["svc.cal.g1", "svc.cal.g2", "svc.cal.g3", "svc.cal.g4"] : ["svc.cal.o1", "svc.cal.o2", "svc.cal.o3"]));
+      const save = svcButton(t("svc.save"), "", () => svcDo(`cal-${p}`, async () => {
+        await invoke("calendar_set", { provider: p, clientId: d.id, clientSecret: p === "google" && d.secret ? d.secret : null });
+        d.open = false;
+        d.secret = "";
+      }), !d.id.trim());
+      const id = el("input", "grow");
+      id.placeholder = t("svc.cal.clientId");
+      id.value = d.id;
+      // The button follows what is typed or pasted (it was drawn with the field empty).
+      id.oninput = () => {
+        d.id = id.value;
+        save.disabled = !d.id.trim();
+      };
+      const r = el("div", "net-row");
+      r.append(id);
+      box.append(r);
+      let secret = null;
+      if (p === "google") {
+        secret = el("input", "grow");
+        secret.type = "password";
+        secret.placeholder = a.secreto ? t("svc.cal.secretKept") : t("svc.cal.secret");
+        secret.oninput = () => (d.secret = secret.value);
+        const r2 = el("div", "net-row");
+        r2.append(secret);
+        box.append(r2);
+      }
+      const r3 = el("div", "net-row");
+      r3.append(el("span", "grow"));
+      if (a.configurado) r3.append(svcButton(t("svc.cancel"), "ghost", () => { d.open = false; renderServices(); }));
+      r3.append(save);
+      box.append(r3);
+    }
+    card.append(box);
+  }
+  if (c.ultimo) card.append(el("div", "hint", t("svc.cal.last", { when: new Date(c.ultimo * 1000).toLocaleString(locale(), { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" }), n: c.anadidos })));
+  if (c.error) card.append(el("div", "hint warn", c.error));
+  return card;
+}
+
+function renderServices() {
+  const body = $("servicesBody");
+  if (!body) return;
+  body.replaceChildren(telegramCard(), calendarCard());
+}
+
+views.loaders.services = loadServices;
+listen("k:telegram", () => { if (isOpen("services")) loadServices(); });
+
 setInterval(() => invoke("state").then(applyState).catch(() => {}), 15000);
 
 boot().catch((e) => {

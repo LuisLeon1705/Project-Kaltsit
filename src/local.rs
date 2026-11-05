@@ -120,6 +120,8 @@ pub struct Local {
     pub actividad: Actividad,
     /// Her body on the desktop: "spine" or "pixel"; empty, her character's default.
     pub cuerpo: String,
+    /// Her bot on Telegram (`telegram`).
+    pub telegram: crate::telegram::Telegram,
 }
 
 impl Default for Local {
@@ -139,6 +141,7 @@ impl Default for Local {
             accesorios: Accesorios::default(),
             actividad: Actividad::default(),
             cuerpo: String::new(),
+            telegram: crate::telegram::Telegram::default(),
         }
     }
 }

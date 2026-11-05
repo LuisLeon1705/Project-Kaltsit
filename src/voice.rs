@@ -692,6 +692,23 @@ pub fn last_error() -> String {
     LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+/// `text` in voice `s`, whole, as samples (a voice note for Telegram): its own copy of the
+/// voice, apart from the one that plays.
+pub fn render(s: &Setup, text: &str) -> Result<(Vec<f32>, u32), String> {
+    let tts = Tts::load(s)?;
+    let (mut all, mut rate) = (Vec::new(), 24_000);
+    for piece in sentences(&speakable(text)) {
+        let (x, r) = tts.synth(&piece)?;
+        rate = r;
+        all.extend(x);
+        all.extend(std::iter::repeat(0.0).take(r as usize / 6));
+    }
+    if all.is_empty() {
+        return Err(crate::lang::tr("no hay nada que decir en voz alta", "there is nothing to say out loud"));
+    }
+    Ok((all, rate))
+}
+
 /// For the tests of `asr`: a line in this voice, without playing it.
 #[cfg(test)]
 pub(crate) fn synth_for_test(s: &Setup, text: &str) -> Result<(Vec<f32>, u32), String> {

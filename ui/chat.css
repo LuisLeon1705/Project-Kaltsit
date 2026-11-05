@@ -42,7 +42,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .meter .b i { display: block; height: 100%; background: var(--c); transition: width 0.4s ease; }
 
 /* ── tabs ── */
-.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; scrollbar-width: none; }
+/* Narrow windows: the tabs that do not fit go to a second row (a hidden horizontal scroll left them out of reach). */
+.tabs { display: flex; flex-wrap: wrap; gap: 0 2px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 7px 11px 6px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .tabs button:hover { color: var(--text); }
@@ -400,3 +401,9 @@ details.adv[open] summary { margin-bottom: 6px; }
 .common-cols li.read { color: var(--muted); }
 .common-cols h4 { margin: 4px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .who-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--c, var(--green)); }
+
+/* Servicios */
+.svc-steps { margin: 6px 0; padding-left: 20px; font-size: 12px; color: var(--muted); }
+.svc-steps li { margin: 2px 0; }
+.svc-code { font-size: 20px; letter-spacing: 0.15em; color: var(--green); font-family: ui-monospace, monospace; }
+#servicesBody input:not([type=checkbox]) { background: #0f1416; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
