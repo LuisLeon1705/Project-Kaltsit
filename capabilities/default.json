@@ -1,7 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "El chat, el selector de compañeras, sus cuerpos en el escritorio y el visor de la memoria solo escuchan eventos e invocan los comandos propios de la app.",
-  "windows": ["chat", "overlay", "overlay-*", "selector", "visor", "visor-*"],
-  "permissions": ["core:default"]
+  "description": "El chat, el selector de compañeras, sus cuerpos en el escritorio, el visor de la memoria y el modo VTuber solo escuchan eventos e invocan los comandos propios de la app; el modo VTuber además se cierra solo y entra o sale de pantalla completa.",
+  "windows": [
+    "chat",
+    "overlay",
+    "overlay-*",
+    "selector",
+    "visor",
+    "visor-*",
+    "vtuber"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
+  ]
 }

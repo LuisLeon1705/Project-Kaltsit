@@ -7,6 +7,8 @@
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
   #chibi { position: absolute; left: 50%; bottom: 0; width: 260px; height: 280px; transform: translateX(-50%); }
+  /* The 3D body: taller than the chibi; the bubble goes over her head. */
+  #chibi.vrm { width: 240px; height: 300px; }
   #bubble {
     position: absolute; left: 12px; right: 12px; bottom: 250px;
     max-height: 150px; overflow: hidden;
@@ -30,6 +32,15 @@
 <body>
 <div id="bubble"><div class="who">Kal'tsit</div><div id="text"></div></div>
 <canvas id="chibi"></canvas>
+<!-- Her 3D body (vrm.js) loads three.js from here, offline. -->
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/",
+  "@pixiv/three-vrm": "./vendor/three/three-vrm.module.min.js",
+  "@pixiv/three-vrm-animation": "./vendor/three/three-vrm-animation.module.min.js"
+} }
+</script>
 <script src="vendor/spine-webgl.js"></script>
 <script src="chibi.js"></script>
 <script src="sprites.js"></script>

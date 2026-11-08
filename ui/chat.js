@@ -2516,18 +2516,56 @@ function bodiesCard() {
       const row = el("div", "net-row");
       row.append(el("span", "grow", b.name));
       const sel = el("select");
-      for (const k of ["spine", "pixel"]) {
+      for (const k of ["spine", "pixel", "vrm"]) {
         const o = el("option", "", t(`body.${k}`));
         o.value = k;
         o.selected = b.cuerpo === k;
+        // 3D only with her .vrm on this computer.
+        o.disabled = k === "vrm" && !b.vrm_ok;
         sel.append(o);
       }
       sel.onchange = async () => {
-        try { await invoke("set_body", { who: b.id, cuerpo: sel.value }); } catch (err) { add("error", String(err)); }
+        try { await invoke("set_body", { who: b.id, cuerpo: sel.value }); } catch (err) { add("error", String(err)); sel.value = b.cuerpo; }
       };
       row.append(sel);
       card.append(row);
+      // Where her 3D model is: the default place, or any .vrm pasted here.
+      const vr = el("div", "net-row");
+      const path = el("input", "grow");
+      path.value = b.vrm;
+      path.title = t("body.vrm.path");
+      path.spellcheck = false;
+      const save = el("button", "ghost", t("svc.save"));
+      save.type = "button";
+      save.onclick = async () => {
+        try { await invoke("set_vrm", { who: b.id, path: path.value }); card.replaceWith(bodiesCard()); } catch (err) { add("error", String(err)); }
+      };
+      vr.append(el("span", `tag${b.vrm_ok ? " body" : ""}`, b.vrm_ok ? "VRM ✓" : "VRM —"), path, save);
+      // VTuber mode: her, full screen, from the waist up (Esc to come back).
+      const vt = el("button", "", t("vtuber.open"));
+      vt.type = "button";
+      vt.disabled = !b.vrm_ok;
+      vt.title = t("vtuber.open.title");
+      vt.onclick = () => invoke("open_vtuber", { who: b.id, monitor: screens.value === "" ? null : Number(screens.value) }).catch((err) => add("error", String(err)));
+      // On which screen (remembered).
+      const screens = el("select");
+      screens.title = t("vtuber.screen");
+      invoke("monitors").then((list) => {
+        let saved = null;
+        try { saved = localStorage.getItem("kaltsit.vtuberScreen"); } catch {}
+        for (const m of list) {
+          const o = el("option", "", `${t("vtuber.screenN", { n: m.i + 1 })} · ${m.w}×${m.h}${m.primary ? " · " + t("vtuber.main") : ""}`);
+          o.value = m.i;
+          o.selected = saved !== null ? String(m.i) === saved : m.primary;
+          screens.append(o);
+        }
+        if (list.length < 2) screens.hidden = true;
+      }).catch(() => (screens.hidden = true));
+      screens.onchange = () => { try { localStorage.setItem("kaltsit.vtuberScreen", screens.value); } catch {} };
+      vr.append(screens, vt);
+      card.append(vr);
     }
+    card.append(el("div", "hint", t("body.vrm.hint")));
   }).catch(() => card.remove());
   return card;
 }
@@ -3380,6 +3418,19 @@ function telegramCard() {
   au.append(sel);
   card.append(au);
   if (!who.ffmpeg && who.audio > 0) card.append(el("div", "hint warn", t("svc.tg.noFfmpeg")));
+  // What she says at home, also there (to see it away from home).
+  const mi = el("div", "net-row");
+  mi.append(el("span", "grow", t("svc.tg.mirror")));
+  const ms = el("select");
+  for (const k of ["nunca", "ausente", "siempre"]) {
+    const o = el("option", "", t(`svc.tg.mirror.${k}`));
+    o.value = k;
+    o.selected = k === (who.espejo || "ausente");
+    ms.append(o);
+  }
+  ms.onchange = () => svcDo(`tg-${who.id}`, () => invoke("telegram_set", { who: who.id, espejo: ms.value }));
+  mi.append(ms);
+  card.append(mi, el("div", "hint", t("svc.tg.mirror.hint")));
   return card;
 }
 

@@ -344,7 +344,7 @@ fn telegram_json(core: &Core) -> Value {
     json!({
         "id": core.who.id, "name": core.who.name, "color": core.who.color,
         "token": !t.token.is_empty(), "bot": t.bot, "vinculado": t.chat != 0, "usuario": t.usuario,
-        "avisos": t.avisos, "aviso_min": t.aviso_min, "audio": t.audio,
+        "avisos": t.avisos, "aviso_min": t.aviso_min, "audio": t.audio, "espejo": t.espejo,
         "codigo": code.as_ref().map(|c| c.0.clone()), "quedan": code.map(|c| (c.1 - mind::unix_now()).round()),
         "escucha": core.role() == life::Role::Brain, "error": core.tg_error.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         "ffmpeg": telegram::ffmpeg().is_some(),
@@ -360,7 +360,7 @@ async fn telegram_state(crew: State<'_, Arc<life::Crew>>) -> Reply {
 /// A companion's bot: its token (checked with Telegram), whether to announce her plans and how
 /// long before, how often an answer also goes as a voice note.
 #[tauri::command]
-async fn telegram_set(crew: State<'_, Arc<life::Crew>>, who: String, token: Option<String>, avisos: Option<bool>, aviso_min: Option<u32>, audio: Option<f32>) -> Reply {
+async fn telegram_set(crew: State<'_, Arc<life::Crew>>, who: String, token: Option<String>, avisos: Option<bool>, aviso_min: Option<u32>, audio: Option<f32>, espejo: Option<String>) -> Reply {
     let core = crew.get(Some(&who)).clone();
     let bot = match token.as_deref().map(str::trim) {
         Some("") => Some(String::new()),
@@ -386,6 +386,9 @@ async fn telegram_set(crew: State<'_, Arc<life::Crew>>, who: String, token: Opti
         }
         if let Some(a) = audio {
             l.telegram.audio = a.clamp(0.0, 1.0);
+        }
+        if let Some(e) = espejo.filter(|e| ["nunca", "ausente", "siempre"].contains(&e.as_str())) {
+            l.telegram.espejo = e;
         }
         l.save(&core.data);
     }
@@ -637,17 +640,137 @@ async fn body_of(crew: State<'_, Arc<life::Crew>>, who: Option<String>) -> Reply
     Ok(json!({ "cuerpo": core.body(), "spine": core.who.spine.id, "pose": rest }))
 }
 
-/// Every companion's body, for the selector in Modelos.
+/// Every companion's body, for the selector in Modelos, with her VRM if she has one.
 #[tauri::command]
 async fn bodies(crew: State<'_, Arc<life::Crew>>) -> Reply {
-    Ok(json!(crew.all.iter().map(|c| json!({ "id": c.who.id, "name": c.who.name, "cuerpo": c.body() })).collect::<Vec<_>>()))
+    Ok(json!(crew.all.iter().map(|c| {
+        let vrm = c.vrm_path();
+        json!({ "id": c.who.id, "name": c.who.name, "cuerpo": c.body(), "vrm": vrm.display().to_string(), "vrm_ok": vrm.is_file() })
+    }).collect::<Vec<_>>()))
 }
 
-/// Changes her body ("spine" or "pixel"); her window on the desktop reloads with it.
+/// Her 3D body, the .vrm file itself (binary, straight to the window).
+#[tauri::command]
+async fn vrm_model(crew: State<'_, Arc<life::Crew>>, who: Option<String>) -> Result<tauri::ipc::Response, String> {
+    let path = crew.get(who.as_deref()).vrm_path();
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Which .vrm is her 3D body (empty: the default place).
+#[tauri::command]
+async fn set_vrm(crew: State<'_, Arc<life::Crew>>, who: String, path: String) -> Reply {
+    let core = crew.get(Some(&who));
+    let path = path.trim().trim_matches('"').to_string();
+    if !path.is_empty() && !(path.to_lowercase().ends_with(".vrm") && std::path::Path::new(&path).is_file()) {
+        return Err(lang::tr(format!("no encuentro un archivo .vrm en {path}"), format!("there is no .vrm file at {path}")));
+    }
+    {
+        let mut l = core.local.lock().unwrap_or_else(|e| e.into_inner());
+        l.vrm = path;
+        l.save(&core.data);
+    }
+    if core.body() == "vrm" {
+        core.emit("k:cuerpo", json!({ "cuerpo": "vrm" }));
+    }
+    Ok(json!({ "vrm": core.vrm_path().display().to_string(), "vrm_ok": core.vrm_path().is_file() }))
+}
+
+/// The screens of this computer, for VTuber mode: name, size and whether it is the main one.
+#[tauri::command]
+async fn monitors(app: tauri::AppHandle) -> Reply {
+    let primary = app.primary_monitor().ok().flatten().map(|m| *m.position());
+    let list = app.available_monitors().map_err(|e| e.to_string())?;
+    Ok(json!(list
+        .iter()
+        .enumerate()
+        .map(|(i, m)| json!({
+            "i": i,
+            "name": m.name().cloned().unwrap_or_else(|| format!("{}", i + 1)),
+            "w": m.size().width, "h": m.size().height,
+            "primary": Some(*m.position()) == primary,
+        }))
+        .collect::<Vec<_>>()))
+}
+
+/// Puts the VTuber window full screen on screen `i` (out of full screen, moved, back in: full
+/// screen takes the screen the window is on).
+fn vtuber_on(w: &tauri::WebviewWindow, i: usize) -> Result<usize, String> {
+    let list = w.available_monitors().map_err(|e| e.to_string())?;
+    if list.is_empty() {
+        return Ok(0);
+    }
+    let i = i % list.len();
+    let m = &list[i];
+    let _ = w.set_fullscreen(false);
+    w.set_position(*m.position()).map_err(|e| e.to_string())?;
+    w.set_fullscreen(true).map_err(|e| e.to_string())?;
+    Ok(i)
+}
+
+/// VTuber mode on another screen: `i`, or the next one.
+#[tauri::command]
+async fn vtuber_screen(app: tauri::AppHandle, i: Option<usize>) -> Reply {
+    let w = app.get_webview_window("vtuber").ok_or("el modo VTuber no está abierto")?;
+    let now = w.current_monitor().ok().flatten().map(|m| *m.position());
+    let list = w.available_monitors().map_err(|e| e.to_string())?;
+    let here = list.iter().position(|m| Some(*m.position()) == now).unwrap_or(0);
+    Ok(json!(vtuber_on(&w, i.unwrap_or(here + 1))?))
+}
+
+/// VTuber mode: one companion full screen in 3D (her VRM), from the waist up, on a plain or
+/// transparent background, on the screen chosen. Her body on the desktop hides meanwhile and
+/// comes back when it closes.
+#[tauri::command]
+async fn open_vtuber(app: tauri::AppHandle, crew: State<'_, Arc<life::Crew>>, who: String, monitor: Option<usize>) -> Reply {
+    let core = crew.get(Some(&who)).clone();
+    if !core.vrm_path().is_file() {
+        return Err(lang::tr("el modo VTuber necesita su modelo 3D (.vrm) en Modelos → Cuerpo", "VTuber mode needs her 3D model (.vrm) under Models → Body"));
+    }
+    if let Some(w) = app.get_webview_window("vtuber") {
+        let _ = w.close();
+    }
+    let w = WebviewWindowBuilder::new(&app, "vtuber", WebviewUrl::App(format!("vtuber.html?who={}", core.who.id).into()))
+        .title(format!("{} · VTuber", core.who.name))
+        .inner_size(1280.0, 720.0)
+        .decorations(false)
+        // Transparent, so the background can be nothing at all (her over the desktop or a game).
+        .transparent(true)
+        .shadow(false)
+        .visible(false)
+        .focused(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let screen = monitor.unwrap_or_else(|| {
+        // Without a choice: the main screen.
+        let primary = app.primary_monitor().ok().flatten().map(|m| *m.position());
+        app.available_monitors().ok().and_then(|l| l.iter().position(|m| Some(*m.position()) == primary)).unwrap_or(0)
+    });
+    vtuber_on(&w, screen)?;
+    let _ = w.show();
+    let _ = w.set_focus();
+    let overlay = app.get_webview_window(&core.overlay_label());
+    if let Some(o) = &overlay {
+        let _ = o.hide();
+    }
+    w.on_window_event(move |e| {
+        if matches!(e, WindowEvent::Destroyed) {
+            if let Some(o) = &overlay {
+                let _ = o.show();
+            }
+        }
+    });
+    Ok(Value::Null)
+}
+
+/// Changes her body ("spine", "pixel" or "vrm"); her window on the desktop reloads with it.
 #[tauri::command]
 async fn set_body(crew: State<'_, Arc<life::Crew>>, who: String, cuerpo: String) -> Reply {
-    if cuerpo != "spine" && cuerpo != "pixel" {
+    if !["spine", "pixel", "vrm"].contains(&cuerpo.as_str()) {
         return Err(lang::tr("cuerpo desconocido", "unknown body"));
+    }
+    if cuerpo == "vrm" && !crew.get(Some(&who)).vrm_path().is_file() {
+        return Err(lang::tr("primero indica su archivo .vrm", "first say which .vrm file is hers"));
     }
     let core = crew.get(Some(&who));
     {
@@ -771,9 +894,11 @@ async fn characters(waiting: State<'_, std::sync::Mutex<Option<Waiting>>>) -> Re
     Ok(json!({
         "personajes": character::ALL.iter().map(|c| {
             // Her body as chosen on this computer before, or her default.
-            let chosen = local::Local::load(&c.data_dir(&data)).cuerpo;
-            let body = if chosen == "spine" || chosen == "pixel" { chosen } else { c.body.to_string() };
-            json!({ "id": c.id, "name": c.name, "color": c.color, "cuerpo": body })
+            let l = local::Local::load(&c.data_dir(&data));
+            let vrm = if l.vrm.is_empty() { catalog::Manifest::load().root().join("vrm").join(format!("{}.vrm", c.id)) } else { l.vrm.clone().into() };
+            let vrm_ok = vrm.is_file();
+            let body = if l.cuerpo == "spine" || l.cuerpo == "pixel" || (l.cuerpo == "vrm" && vrm_ok) { l.cuerpo } else { c.body.to_string() };
+            json!({ "id": c.id, "name": c.name, "color": c.color, "cuerpo": body, "vrm_ok": vrm_ok })
         }).collect::<Vec<_>>(),
         "elegidos": chosen,
         "idioma": lang,
@@ -791,7 +916,7 @@ async fn start_crew(app: tauri::AppHandle, waiting: State<'_, std::sync::Mutex<O
     Team { personajes: chosen.iter().map(|c| c.id.to_string()).collect(), recordar: remember }.save(&w.data);
     // The body chosen for each, kept in her own settings (Kal'tsit's are this computer's).
     for c in &chosen {
-        if let Some(b) = bodies.as_ref().and_then(|m| m.get(c.id)).filter(|b| *b == "spine" || *b == "pixel") {
+        if let Some(b) = bodies.as_ref().and_then(|m| m.get(c.id)).filter(|b| ["spine", "pixel", "vrm"].contains(&b.as_str())) {
             let dir = c.data_dir(&w.data);
             let mut l = if dir == w.data { w.local.clone() } else { local::Local::load(&dir) };
             l.cuerpo = b.clone();
@@ -855,8 +980,8 @@ fn launch(app: &tauri::AppHandle, chosen: Vec<&'static character::Character>, ne
     app.manage(crew.clone());
     // A mouth follows the voice of whoever is speaking, on this computer only (where it plays).
     let handle = app.clone();
-    voice::on_play(move |who, level| {
-        let _ = handle.emit("k:voz", json!({ "level": level, "who": who }));
+    voice::on_play(move |who, level, shape| {
+        let _ = handle.emit("k:voz", json!({ "level": level, "who": who, "v": shape }));
     });
     // …and the fine ear learns each one's voice from what she says, to know it when the
     // microphone hears it back from the speakers.
@@ -1090,7 +1215,7 @@ fn main() {
                 window.app_handle().exit(0);
             }
         })
-        .invoke_handler(tauri::generate_handler![history, state, memory, memory_graph, open_viewer, red, send, type_chat, look_now, set_config, set_user, first_run, think_here, resolve_proposal, set_neighbor, pairing, link_request, link_answer, unlink, set_public_networks, set_chat_capture, engine_state, engine_restart, engine_set, set_voice, voices, voice_test, mic_start, mic_stop, voice_name, voice_clip, voice_name_clip, open_mic, activity_days, activity_day, common_bank, team, set_team, telegram_state, telegram_set, telegram_link, calendar_state, calendar_set, calendar_connect, calendar_disconnect, calendar_sync, characters, start_crew, body_of, bodies, set_body, models_state, model_download, model_use, model_add, model_remove, chibi_model, accessories_state, accessory_install, accessory_uninstall, accessory_fabric_api, accessories_config, open_folder, minecraft_plan, minecraft_order])
+        .invoke_handler(tauri::generate_handler![history, state, memory, memory_graph, open_viewer, red, send, type_chat, look_now, set_config, set_user, first_run, think_here, resolve_proposal, set_neighbor, pairing, link_request, link_answer, unlink, set_public_networks, set_chat_capture, engine_state, engine_restart, engine_set, set_voice, voices, voice_test, mic_start, mic_stop, voice_name, voice_clip, voice_name_clip, open_mic, activity_days, activity_day, common_bank, team, set_team, telegram_state, telegram_set, telegram_link, calendar_state, calendar_set, calendar_connect, calendar_disconnect, calendar_sync, characters, start_crew, body_of, bodies, set_body, vrm_model, set_vrm, open_vtuber, monitors, vtuber_screen, models_state, model_download, model_use, model_add, model_remove, chibi_model, accessories_state, accessory_install, accessory_uninstall, accessory_fabric_api, accessories_config, open_folder, minecraft_plan, minecraft_order])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Kal'tsit");
 }

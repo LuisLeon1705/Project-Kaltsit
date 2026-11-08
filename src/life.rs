@@ -372,10 +372,24 @@ impl Core {
 
     /// Her body on the desktop: the one chosen on this computer, or her character's default.
     pub fn body(&self) -> &'static str {
-        match lock(&self.local).cuerpo.as_str() {
+        // Copied out: `vrm_path` takes the same lock.
+        let chosen = lock(&self.local).cuerpo.clone();
+        match chosen.as_str() {
             "spine" => "spine",
             "pixel" => "pixel",
+            // Her 3D body only while its file is there.
+            "vrm" if self.vrm_path().is_file() => "vrm",
             _ => self.who.body,
+        }
+    }
+
+    /// Her .vrm: the one chosen, or `modelos/vrm/<id>.vrm`.
+    pub fn vrm_path(&self) -> PathBuf {
+        let chosen = lock(&self.local).vrm.clone();
+        if chosen.is_empty() {
+            crate::catalog::Manifest::load().root().join("vrm").join(format!("{}.vrm", self.who.id))
+        } else {
+            PathBuf::from(chosen)
         }
     }
 
@@ -1111,7 +1125,9 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         })?;
         let reply = mind::clean_reply(&raw);
         // The bubble ends with what she says; an action block is for the game, never for the chat.
-        self.emit("k:said", json!({ "id": id, "text": crate::minecraft_bridge::spoken(&reply) }));
+        let spoken = crate::minecraft_bridge::spoken(&reply);
+        self.emit("k:said", json!({ "id": id, "text": spoken }));
+        self.mirror_to_telegram(&spoken);
         lock(&self.eyes).last_spoke = Some(unix_now());
         Ok(reply)
     }
@@ -1121,6 +1137,7 @@ Leave out code, links, lists, asterisks, sighs or ellipses ('...'); never add an
         self.emit("k:start", json!({ "id": id, "alone": true }));
         self.anim("Interact", false);
         self.emit("k:said", json!({ "id": id, "text": text, "alone": true }));
+        self.mirror_to_telegram(text);
         lock(&self.eyes).last_spoke = Some(unix_now());
     }
 
@@ -2316,6 +2333,56 @@ impl Core {
         });
     }
 
+    /// What she says at home (an answer in the chat, something on her own) also to her bot, as
+    /// chosen (`espejo`): so the user sees it away from home. Not her answers to Telegram itself
+    /// (they go there already), and only from where she thinks (once).
+    fn mirror_to_telegram(&self, text: &str) {
+        if self.hush.load(Ordering::Acquire) || !self.is_brain() || text.trim().is_empty() {
+            return;
+        }
+        let tg = lock(&self.local).telegram.clone();
+        if tg.token.is_empty() || tg.chat == 0 || !crate::telegram::mirrors(&tg.espejo, crate::local::idle_seconds()) {
+            return;
+        }
+        let text = text.to_string();
+        std::thread::spawn(move || {
+            let _ = crate::telegram::send_message(&tg.token, tg.chat, &text);
+        });
+    }
+
+    /// The user has been away from the computer a while: she writes to them on Telegram on her
+    /// own, a line or two in her voice (about what they left open, or anything), sometimes as a
+    /// voice note too. Quiet at home; not while resting (her model is off then).
+    fn telegram_checkin(self: &Arc<Self>, tg: &crate::telegram::Telegram, away_s: f64) {
+        if self.mind().config.reposo || self.busy.load(Ordering::Acquire) {
+            return;
+        }
+        let (core, tg) = (self.clone(), tg.clone());
+        std::thread::spawn(move || {
+            if core.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() || !core.motor.healthy() {
+                return;
+            }
+            let _free = Free(&core.busy);
+            let (l, person) = { let m = core.mind(); (m.lang(), m.user.clone()) };
+            let left = crate::activity::left_off(&crate::activity::before(&core.common, &person, unix_now() - away_s, 2.0));
+            let lines: Vec<String> = left.iter().map(|s| format!("«{}» en {}", s.titulo, s.app)).collect();
+            let hint = crate::lang::away_checkin_hint(l, &person, &crate::clock::span(away_s, l), &lines);
+            core.hush.store(true, Ordering::Release);
+            let r = core.reply_with_hint(crate::lang::away_placeholder(l), &hint, 120);
+            core.hush.store(false, Ordering::Release);
+            match r {
+                Ok(reply) => {
+                    let reply = crate::minecraft_bridge::spoken(&reply);
+                    if crate::telegram::send_message(&tg.token, tg.chat, &reply).is_ok() && roll() < tg.audio {
+                        let _ = core.telegram_voice(&tg, &reply);
+                    }
+                }
+                Err(e) => core.status(&format!("{e}")),
+            }
+            core.status("");
+        });
+    }
+
     /// Her answer as a voice note too: her voice (in English if that is what it speaks), as Opus.
     fn telegram_voice(&self, tg: &crate::telegram::Telegram, text: &str) -> Result<(), String> {
         let s = self.voice_setup()?;
@@ -2380,11 +2447,20 @@ pub fn spawn_telegram(core: Arc<Core>) {
     std::thread::spawn(move || {
         let mut offset = 0i64;
         let mut reminded = 0.0;
+        let (mut wrote_for, mut wrote_at) = (0.0, 0.0);
         loop {
             let tg = lock(&core.local).telegram.clone();
             if tg.token.is_empty() || !core.is_brain() {
                 std::thread::sleep(Duration::from_secs(5));
                 continue;
+            }
+            // Away a while (nobody at the computer, so nothing for her to say at home): she
+            // writes there on her own, once.
+            let (idle, now) = (crate::local::idle_seconds(), unix_now());
+            if tg.chat != 0 && crate::telegram::checks_in(&tg.espejo, idle, now - idle, wrote_for, wrote_at, now) {
+                wrote_for = now - idle;
+                wrote_at = now;
+                core.telegram_checkin(&tg, idle);
             }
             if tg.chat != 0 && tg.avisos && unix_now() - reminded >= 60.0 {
                 reminded = unix_now();

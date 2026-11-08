@@ -407,3 +407,5 @@ details.adv[open] summary { margin-bottom: 6px; }
 .svc-steps li { margin: 2px 0; }
 .svc-code { font-size: 20px; letter-spacing: 0.15em; color: var(--green); font-family: ui-monospace, monospace; }
 #servicesBody input:not([type=checkbox]) { background: #0f1416; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+
+#modelsBody .net-row input:not([type=checkbox]) { background: #0f1416; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; font-size: 12px; }

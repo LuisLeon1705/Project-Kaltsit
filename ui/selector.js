@@ -29,7 +29,7 @@ async function main() {
     const body = document.createElement("select");
     body.className = "body";
     body.dataset.id = c.id;
-    for (const k of ["spine", "pixel"]) {
+    for (const k of c.vrm_ok ? ["spine", "pixel", "vrm"] : ["spine", "pixel"]) {
       const o = document.createElement("option");
       o.value = k;
       o.textContent = t(`body.${k}`);

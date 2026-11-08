@@ -488,6 +488,7 @@ fn play_blocking(samples: &[f32], rate: u32, turn: u64) {
     use windows_sys::Win32::Media::{MMTIME, TIME_BYTES, TIME_MS, TIME_SAMPLES};
     let pcm: Vec<i16> = samples.iter().map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16).collect();
     let levels = loudness(samples, rate);
+    let shapes = vowels(samples, rate);
     let step = (rate / MOUTH_FPS).max(1) as usize;
     let fmt = WAVEFORMATEX { wFormatTag: WAVE_FORMAT_PCM as u16, nChannels: 1, nSamplesPerSec: rate, nAvgBytesPerSec: rate * 2, nBlockAlign: 2, wBitsPerSample: 16, cbSize: 0 };
     let hdr_size = std::mem::size_of::<WAVEHDR>() as u32;
@@ -516,7 +517,7 @@ fn play_blocking(samples: &[f32], rate: u32, turn: u64) {
                 if pos >= samples.len() || TURN.load(Ordering::Acquire) != turn || Instant::now() > deadline {
                     break;
                 }
-                tell(levels.get(pos / step).copied().unwrap_or(0.0));
+                tell(levels.get(pos / step).copied().unwrap_or(0.0), shapes.get(pos / step).copied().unwrap_or([0.0; 5]));
                 std::thread::sleep(Duration::from_millis(1000 / MOUTH_FPS as u64));
             }
         }
@@ -525,7 +526,7 @@ fn play_blocking(samples: &[f32], rate: u32, turn: u64) {
         waveOutUnprepareHeader(out, &mut hdr, hdr_size);
         waveOutClose(out);
     }
-    tell(0.0);
+    tell(0.0, [0.0; 5]);
 }
 
 #[cfg(not(windows))]
@@ -546,7 +547,7 @@ static SPEAKER: Mutex<String> = Mutex::new(String::new());
 static TURN: AtomicU64 = AtomicU64::new(0);
 /// Told the loudness of what is playing, `MOUTH_FPS` times a second, and 0 when it ends or is
 /// cut: the chibi moves her mouth with it.
-static ON_PLAY: OnceLock<Box<dyn Fn(&str, f32) + Send + Sync>> = OnceLock::new();
+static ON_PLAY: OnceLock<Box<dyn Fn(&str, f32, [f32; 5]) + Send + Sync>> = OnceLock::new();
 
 /// How often the loudness is measured and told.
 pub const MOUTH_FPS: u32 = 30;
@@ -558,14 +559,64 @@ pub fn is_playing() -> bool {
     PLAYING.load(Ordering::Acquire)
 }
 
+/// The vowel shapes of each 1/`MOUTH_FPS` s (VRM's aa, ih, ou, ee, oh, adding up to 1; all 0 in
+/// silence), from where the first two formants are: F1 high is an open mouth (a), F2 high a wide
+/// one (i, e), both low a round one (o, u). Rough, but it reads the sound itself.
+pub fn vowels(samples: &[f32], rate: u32) -> Vec<[f32; 5]> {
+    let step = (rate / MOUTH_FPS).max(1) as usize;
+    samples
+        .chunks(step)
+        .map(|c| {
+            let rms = (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt();
+            if rms < 0.01 {
+                return [0.0; 5];
+            }
+            let (f1, f2) = formants(c, rate);
+            let mut w = VOWEL_SHAPES.map(|(a, b)| (-(((f1 - a) / 70.0).powi(2) + ((f2 - b) / 140.0).powi(2))).exp());
+            let sum: f32 = w.iter().sum();
+            for x in &mut w {
+                *x /= sum.max(1e-6);
+            }
+            w
+        })
+        .collect()
+}
+
+/// Where VRM's five vowels sit, (F1, F2) in Hz: measured on the cloned voices saying words with
+/// one clear vowel (`vowels_of_her_voice`), as this rough estimate sees them.
+const VOWEL_SHAPES: [(f32, f32); 5] = [(635.0, 1220.0), (355.0, 1725.0), (404.0, 1338.0), (451.0, 1613.0), (522.0, 1226.0)];
+
+/// A rough F1 and F2 of a frame: the energy-weighted centre of the low band and of the high one.
+pub fn formants(c: &[f32], rate: u32) -> (f32, f32) {
+    const LOW: [f32; 9] = [250.0, 350.0, 450.0, 550.0, 650.0, 750.0, 850.0, 950.0, 1050.0];
+    const HIGH: [f32; 10] = [800.0, 1000.0, 1200.0, 1400.0, 1600.0, 1800.0, 2100.0, 2400.0, 2700.0, 3000.0];
+    // Energy at a frequency (Goertzel).
+    let power = |c: &[f32], f: f32| {
+        let w = 2.0 * (2.0 * std::f32::consts::PI * f / rate as f32).cos();
+        let (mut a, mut b) = (0.0f32, 0.0f32);
+        for x in c {
+            let s = x + w * a - b;
+            b = a;
+            a = s;
+        }
+        a * a + b * b - w * a * b
+    };
+    let centroid = |fs: &[f32]| {
+        let e: Vec<f32> = fs.iter().map(|f| power(c, *f)).collect();
+        let total: f32 = e.iter().sum();
+        fs.iter().zip(&e).map(|(f, e)| f * e).sum::<f32>() / total.max(1e-12)
+    };
+    (centroid(&LOW), centroid(&HIGH))
+}
+
 /// The RMS of each 1/`MOUTH_FPS` s of the audio.
 pub fn loudness(samples: &[f32], rate: u32) -> Vec<f32> {
     let step = (rate / MOUTH_FPS).max(1) as usize;
     samples.chunks(step).map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt()).collect()
 }
 
-/// Where the loudness goes (set once, at start-up).
-pub fn on_play(f: impl Fn(&str, f32) + Send + Sync + 'static) {
+/// Where the loudness and the vowel go (set once, at start-up).
+pub fn on_play(f: impl Fn(&str, f32, [f32; 5]) + Send + Sync + 'static) {
     let _ = ON_PLAY.set(Box::new(f));
 }
 
@@ -578,10 +629,10 @@ pub fn on_piece(f: impl Fn(&str, &[f32], u32) + Send + Sync + 'static) {
     let _ = ON_PIECE.set(Box::new(f));
 }
 
-fn tell(level: f32) {
+fn tell(level: f32, shape: [f32; 5]) {
     if let Some(f) = ON_PLAY.get() {
         let who = SPEAKER.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        f(&who, level);
+        f(&who, level, shape);
     }
 }
 /// Reported to the app: why the last utterance failed, if it did.
@@ -779,7 +830,7 @@ mod tests {
         use std::time::Instant;
         static HEARD: Mutex<Vec<(f32, f32)>> = Mutex::new(Vec::new());
         static START: OnceLock<Instant> = OnceLock::new();
-        on_play(|_, level| HEARD.lock().unwrap().push((START.get().unwrap().elapsed().as_secs_f32(), level)));
+        on_play(|_, level, _| HEARD.lock().unwrap().push((START.get().unwrap().elapsed().as_secs_f32(), level)));
         let rate = 24000;
         let tone: Vec<f32> = (0..rate * 9 / 10)
             .map(|i| if (rate * 3 / 10..rate * 6 / 10).contains(&i) { 0.05 * (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() } else { 0.0 })
@@ -806,6 +857,37 @@ mod tests {
         assert_eq!(s.len(), 4);
         assert!((s[1] - 0.5).abs() < 1e-3 && (s[2] + 0.5).abs() < 1e-3);
         let _ = std::fs::remove_file(&p);
+    }
+
+    /// Her voice saying words with one clear vowel: which mouth shape wins while it sounds
+    /// (to tune `vowels`; prints, asserts only that the open ones and the closed ones differ).
+    #[test]
+    #[ignore]
+    fn vowels_of_her_voice() {
+        let m = Manifest::load();
+        let names = ["aa", "ih", "ou", "ee", "oh"];
+        for id in ["voz-kaltsit-en", "voz-lappland-en"] {
+            let Ok(s) = setup(&m, id, 1.0) else { continue };
+            for (want, word) in [("aa", "Ah. Father. Calm."), ("ih", "See. Me. Keep."), ("ou", "Who. You. Food."), ("ee", "Say. Day. Wait."), ("oh", "Go. No. Slow.")] {
+                let (x, r) = synth_for_test(&s, word).unwrap();
+                let mut count = [0usize; 5];
+                let mut mean = [0f32; 5];
+                // The middle third of each word is its vowel (no consonants at the edges).
+                let step = (r / MOUTH_FPS) as usize;
+                let fr: Vec<(f32, f32)> = x.chunks(step).filter(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt() > 0.03).map(|c| formants(c, r)).collect();
+                let (f1, f2) = fr.iter().fold((0.0, 0.0), |a, b| (a.0 + b.0 / fr.len() as f32, a.1 + b.1 / fr.len() as f32));
+                eprintln!("{id} {want}: F1 {f1:.0} F2 {f2:.0} (loud frames {})", fr.len());
+                for v in vowels(&x, r).into_iter().filter(|v| v.iter().sum::<f32>() > 0.0) {
+                    let top = (0..5).max_by(|a, b| v[*a].total_cmp(&v[*b])).unwrap();
+                    count[top] += 1;
+                    for i in 0..5 {
+                        mean[i] += v[i];
+                    }
+                }
+                let n: usize = count.iter().sum();
+                eprintln!("{id} {want:>2} «{word}»: {}", (0..5).map(|i| format!("{} {:>3}%", names[i], 100 * count[i] / n.max(1))).collect::<Vec<_>>().join(" · "));
+            }
+        }
     }
 
     /// With the voices downloaded (Modelos), they really speak, accents included.

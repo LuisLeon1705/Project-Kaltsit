@@ -623,6 +623,30 @@ pub fn scheduled(l: Lang, label: &str, when: &str) -> String {
     }
 }
 
+/// The user has been away from the computer for `away`: she writes to them on Telegram on her
+/// own. `left`: what they had open when they left, if anything.
+pub fn away_checkin_hint(l: Lang, user: &str, away: &str, left: &[String]) -> String {
+    let what = if left.is_empty() { String::new() } else { left.join("; ") };
+    match l {
+        Lang::Es => format!(
+            "{user} lleva {away} lejos de la computadora. Por iniciativa propia le escribes por Telegram un mensaje breve (una o dos frases), en tu voz: lo que de verdad te nazca decirle. {}No le ofrezcas ayuda por reflejo ni lo presiones a volver.",
+            if what.is_empty() { String::new() } else { format!("Lo que dejó abierto al irse: {what}. ") }
+        ),
+        Lang::En => format!(
+            "{user} has been away from the computer for {away}. On your own initiative you write them a short Telegram message (one or two sentences), in your voice: whatever you truly feel like telling them. {}Do not offer help by reflex or push them to come back.",
+            if what.is_empty() { String::new() } else { format!("What they left open: {what}. ") }
+        ),
+    }
+}
+
+/// What stands for the user's turn when she writes to them on her own while they are away.
+pub fn away_placeholder(l: Lang) -> &'static str {
+    match l {
+        Lang::Es => "(no está; le escribes tú por Telegram)",
+        Lang::En => "(away; you write to them on Telegram)",
+    }
+}
+
 /// The message came by Telegram: the user is away from the computer.
 pub fn by_telegram(l: Lang) -> String {
     match l {

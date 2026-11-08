@@ -25,11 +25,14 @@ pub struct Telegram {
     pub aviso_min: u32,
     /// Chance that an answer also goes as a voice note (0..1).
     pub audio: f32,
+    /// What she says at home (in the chat, on her own) also goes to Telegram: "nunca",
+    /// "ausente" (when nobody has used the computer for a while) or "siempre".
+    pub espejo: String,
 }
 
 impl Default for Telegram {
     fn default() -> Self {
-        Telegram { token: String::new(), bot: String::new(), chat: 0, usuario: String::new(), avisos: true, aviso_min: 30, audio: 0.15 }
+        Telegram { token: String::new(), bot: String::new(), chat: 0, usuario: String::new(), avisos: true, aviso_min: 30, audio: 0.15, espejo: "ausente".into() }
     }
 }
 
@@ -198,6 +201,30 @@ pub fn to_voice_note(ffmpeg: &std::path::Path, wav: &[u8]) -> Result<Vec<u8>, St
     out.map_err(|e| e.to_string())
 }
 
+// ── what she says at home ──
+
+/// Nobody has touched the computer for this long: the user is away.
+pub const AWAY_S: f64 = 300.0;
+/// Away this long, she writes on her own (once per absence)…
+pub const CHECKIN_S: f64 = 20.0 * 60.0;
+/// …and never more often than this.
+pub const CHECKIN_GAP_S: f64 = 2.0 * 3600.0;
+
+/// Whether she writes now on her own: away long enough, a new absence (`since`: when it began,
+/// against the one she already wrote for) and not too soon after the last time.
+pub fn checks_in(mode: &str, idle: f64, since: f64, wrote_for: f64, last: f64, now: f64) -> bool {
+    mode != "nunca" && idle >= CHECKIN_S && (since - wrote_for).abs() > 60.0 && now - last >= CHECKIN_GAP_S
+}
+
+/// Whether what she says at home goes to Telegram too, with the computer idle for `idle` s.
+pub fn mirrors(mode: &str, idle: f64) -> bool {
+    match mode {
+        "siempre" => true,
+        "ausente" => idle >= AWAY_S,
+        _ => false,
+    }
+}
+
 // ── reminders ──
 
 /// The plans to announce now: in the next `minutes`, not announced yet (`done`: their keys).
@@ -255,6 +282,29 @@ mod tests {
         let d = due(&plans, now, 30, &[]);
         assert_eq!(d, vec![(now + 600.0, "Dentista".to_string())]);
         assert!(due(&plans, now, 30, &[key(now + 600.0, "dentista")]).is_empty(), "announced already");
+    }
+
+    #[test]
+    fn what_she_says_at_home_goes_out_only_as_chosen() {
+        assert!(mirrors("siempre", 0.0));
+        assert!(!mirrors("ausente", 30.0), "someone is at the computer");
+        assert!(mirrors("ausente", AWAY_S + 1.0));
+        assert!(!mirrors("nunca", 10_000.0));
+        assert!(!mirrors("", 10_000.0));
+        assert_eq!(Telegram::default().espejo, "ausente");
+    }
+
+    /// Away 20 minutes she writes, once for that absence, and not again within two hours.
+    #[test]
+    fn she_writes_once_when_the_user_is_away() {
+        let now = 100_000.0;
+        let since = now - 1300.0;
+        assert!(!checks_in("ausente", 600.0, now - 600.0, 0.0, 0.0, now), "ten minutes is not long enough");
+        assert!(checks_in("ausente", 1300.0, since, 0.0, 0.0, now));
+        assert!(!checks_in("ausente", 1310.0, since, since, now - 10.0, now + 10.0), "the same absence");
+        assert!(!checks_in("ausente", 900.0 + CHECKIN_S, now, since, now - 1800.0, now + 1800.0), "a new absence, too soon");
+        assert!(checks_in("siempre", CHECKIN_S, now, since, now - CHECKIN_GAP_S, now));
+        assert!(!checks_in("nunca", 99_999.0, since, 0.0, 0.0, now));
     }
 
     #[test]

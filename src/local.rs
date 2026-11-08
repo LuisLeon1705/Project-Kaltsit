@@ -122,6 +122,9 @@ pub struct Local {
     pub cuerpo: String,
     /// Her bot on Telegram (`telegram`).
     pub telegram: crate::telegram::Telegram,
+    /// Her 3D body: a .vrm file on this computer (empty: `modelos/vrm/<id>.vrm`). Never copied
+    /// into the repository: VRM models usually forbid redistribution.
+    pub vrm: String,
 }
 
 impl Default for Local {
@@ -142,6 +145,7 @@ impl Default for Local {
             actividad: Actividad::default(),
             cuerpo: String::new(),
             telegram: crate::telegram::Telegram::default(),
+            vrm: String::new(),
         }
     }
 }

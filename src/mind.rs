@@ -3175,6 +3175,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// The last hours of this install's chat (read only), with the time of each line.
+    #[test]
+    #[ignore]
+    fn print_recent_chat() {
+        let m = Mind::open(Path::new("data"), "modelo-de-prueba").unwrap();
+        let now = unix_now();
+        for c in m.mem.chat.iter().filter(|c| c.at > now - 6.0 * 3600.0) {
+            let t = clock::to_local(c.at).map(|l| format!("{:02}:{:02}", l.hour, l.minute)).unwrap_or_default();
+            eprintln!("{t} {:<9} {}", c.role.name(), c.text.chars().take(90).collect::<String>().replace(char::from(10), " "));
+        }
+    }
+
     /// "Agéndame…": the plan is in her agenda with its date and name, once, and survives a save.
     #[test]
     fn a_plan_asked_for_is_in_the_agenda() {

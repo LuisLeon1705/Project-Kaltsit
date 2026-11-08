@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>VTuber</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg, #00b140); font: 15px/1.45 "Segoe UI", system-ui, sans-serif; cursor: default; user-select: none; }
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* What she says, as subtitles. */
+  #subs { position: absolute; left: 50%; bottom: 6vh; transform: translateX(-50%); max-width: min(80vw, 1100px); text-align: center;
+    font-size: clamp(18px, 2.6vh, 34px); font-weight: 600; color: #fff; text-shadow: 0 0 4px #000, 0 2px 6px #000, 0 0 2px #000;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  #subs.show { opacity: 1; }
+  #subs .who { display: block; font-size: 0.6em; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.85; }
+  /* The keys, shown a few seconds and when the pointer moves to the top. */
+  #help { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: 10px;
+    background: rgba(15, 20, 22, 0.82); color: #e6e9e3; font-size: 13px; transition: opacity 0.4s; white-space: nowrap; }
+  #help.hide { opacity: 0; pointer-events: none; }
+  #help b { color: #9fd24a; font-weight: 600; }
+  #err { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; text-shadow: 0 1px 4px #000; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="subs"><span class="who"></span><span id="subText"></span></div>
+<div id="help"></div>
+<div id="err"></div>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/",
+  "@pixiv/three-vrm": "./vendor/three/three-vrm.module.min.js",
+  "@pixiv/three-vrm-animation": "./vendor/three/three-vrm-animation.module.min.js"
+} }
+</script>
+<script src="i18n.js"></script>
+<script type="module" src="vtuber.js"></script>
+</body>
+</html>

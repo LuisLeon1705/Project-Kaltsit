@@ -18,7 +18,8 @@ invoke("state").then((s) => setLang(s.idioma)).catch(() => {});
 listen("k:state", (e) => { if (e.payload && e.payload.idioma) setLang(e.payload.idioma); });
 
 // Her body: the one chosen for her (Modelos → Cuerpo): her Spine chibi, downloaded on demand,
-// or her pixel art (personajes/<id>/). Changing it reloads this window with the other.
+// her pixel art (personajes/<id>/) or her 3D model (a VRM on this computer). Changing it reloads
+// this window with the other.
 const NAMES = { kaltsit: "Kal'tsit", lappland: "Lappland" };
 document.querySelector("#bubble .who").textContent = NAMES[ME] || ME;
 document.title = NAMES[ME] || ME;
@@ -27,6 +28,17 @@ const made = invoke("body_of", { who: ME })
   .then((b) => {
     const c = document.getElementById("chibi");
     const pose = (body) => { if (b.pose && b.pose !== "Relax") body.ready.then(() => body.play(b.pose)); return body; };
+    // Her 3D body (VRM): a module of its own, loaded only when it is the one chosen.
+    if (b.cuerpo === "vrm") {
+      c.classList.add("vrm");
+      document.getElementById("bubble").style.bottom = "290px";
+      return import("./vrm.js").then((m) => {
+        const body = pose(new m.VrmBody(c, ME));
+        invoke("state", { who: ME }).then((s) => body.feel(s.hormonas)).catch(() => {});
+        listen("k:state", (e) => body.feel(e.payload && e.payload.hormonas));
+        return body;
+      });
+    }
     if (b.cuerpo !== "pixel") return pose(new Chibi(c, b.spine, ME));
     // Pixel for pixel: the canvas takes her size; the bubble sits over her head.
     c.style.width = c.style.height = "auto";
@@ -76,7 +88,7 @@ function hideLater(text) {
 made.then((chibi) => chibi.ready.then(() => {
   listen("k:anim", (e) => chibi.play(e.payload.name, e.payload.loop !== false));
   listen("k:face", (e) => chibi.face(!!e.payload.left));
-  listen("k:voz", (e) => chibi.speak(e.payload.level));
+  listen("k:voz", (e) => chibi.speak(e.payload.level, e.payload.v));
   listen("k:start", (e) => {
     current = e.payload.id;
     acc = "";
